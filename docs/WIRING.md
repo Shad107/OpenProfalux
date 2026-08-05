@@ -2,18 +2,35 @@
 
 Convention couleurs standard pour souder les 7 fils entre **EBYTE E07-900M10S** et **ESP32 DevKit**.
 
-## Table câblage
+## Table câblage — Target M5Stack ATOM Lite (=Dupont-friendly bottom header)
 
-| Signal | Couleur fil | Pin E07 | Rangée E07 | Pin ESP32 | Rôle |
-|--------|-------------|---------|------------|-----------|------|
-| **VCC** | 🔴 **Rouge** | 9 | **HAUT** (=milieu) | 3.3V | Alimentation |
-| **GND** | ⚫ **Noir** | 20 (ou 22) | **BAS** (=milieu-droit) | GND | Masse |
-| **MOSI** | 🟡 **Jaune** | 17 | **BAS** (=milieu) | GPIO23 | SPI data out |
-| **MISO** | 🟢 **Vert** | 16 | **BAS** (=milieu) | GPIO19 | SPI data in |
-| **SCK** | 🔵 **Bleu** | 18 | **BAS** (=milieu) | GPIO18 | SPI clock |
-| **CSN** | ⚪ **Blanc** | 19 | **BAS** (=milieu) | GPIO5 | SPI chip select |
-| **GDO0** | 🟠 **Orange** | 15 | **BAS** (=milieu) | GPIO4 | Data async OOK |
-| GDO2 (optionnel) | 🟣 Violet | 14 | **BAS** (=milieu-gauche) | GPIO2 | Debug (=non requis) |
+| Signal | Couleur fil | Pin E07 | Rangée E07 | Pin M5Stack ATOM Lite | Rôle |
+|--------|-------------|---------|------------|-----------------------|------|
+| **VCC** | 🔴 **Rouge** | 9 | **HAUT** (=milieu) | **3.3V** (bottom) | Alimentation |
+| **GND** | ⚫ **Noir** | 20 (ou 22) | **BAS** (=milieu-droit) | **GND** (bottom) | Masse |
+| **MOSI** | 🟡 **Jaune** | 17 | **BAS** (=milieu) | **G23** (bottom) | SPI data out |
+| **MISO** | 🟢 **Vert** | 16 | **BAS** (=milieu) | **G33** (bottom) | SPI data in |
+| **SCK** | 🔵 **Bleu** | 18 | **BAS** (=milieu) | **G19** (bottom) | SPI clock |
+| **CSN** | ⚪ **Blanc** | 19 | **BAS** (=milieu) | **G22** (bottom) | SPI chip select |
+| **GDO0** | 🟠 **Orange** | 15 | **BAS** (=milieu) | **G25** (bottom) | Data async OOK |
+| GDO2 (optionnel) | 🟣 Violet | 14 | **BAS** (=milieu-gauche) | **G21** (bottom) | Debug (=non requis) |
+
+## Alternative — Target External (=ESP32 DevKit)
+
+| Signal | Pin E07 | ESP32 DevKit |
+|--------|---------|--------------|
+| VCC | 9 | 3.3V |
+| GND | 20 | GND |
+| MOSI | 17 | GPIO23 |
+| MISO | 16 | GPIO19 |
+| SCK | 18 | GPIO18 |
+| CSN | 19 | GPIO5 |
+| GDO0 | 15 | GPIO4 |
+| GDO2 | 14 | GPIO2 |
+
+**Compile flag** :
+- `CONFIG_OPENPROFALUX_TARGET_M5STACK=y` → M5Stack ATOM Lite (=production)
+- `CONFIG_OPENPROFALUX_TARGET_EXTERNAL=y` → ESP32 DevKit (=prototype)
 
 **Convention** : rouge/noir suit le standard électronique universel. Signaux SPI ordre visuel type Ethernet (=jaune/vert/bleu/blanc pour paires).
 

@@ -45,19 +45,21 @@
 
 #elif defined(CONFIG_OPENPROFALUX_TARGET_M5STACK)
 
-    /* ─── Target M5Stack ATOM Lite ─── */
+    /* ─── Target M5Stack ATOM Lite ESP32-PICO-D4 ─── */
+    /* Câblage Dupont femelle-femelle sur bottom header ATOM Lite */
     #define TARGET_NAME               "m5stack_atom"
 
-    /* CC1101 sur Grove connector (=I2C pins reassigned SPI) */
+    /* CC1101 SPI - tous pins sur bottom header ATOM Lite (=Dupont-friendly) */
     #define CC1101_SPI_HOST           HSPI_HOST
-    #define CC1101_PIN_MISO           33  /* Grove Y */
-    #define CC1101_PIN_MOSI           26  /* Grove W (=hardware SPI) */
-    #define CC1101_PIN_SCK            32
-    #define CC1101_PIN_CS             19
-    #define CC1101_PIN_GDO0           22
-    #define CC1101_PIN_GDO2           -1  /* Not used */
+    #define CC1101_PIN_MISO           33  /* bottom G33 - 🟢 vert */
+    #define CC1101_PIN_MOSI           23  /* bottom G23 - 🟡 jaune */
+    #define CC1101_PIN_SCK            19  /* bottom G19 - 🔵 bleu */
+    #define CC1101_PIN_CS             22  /* bottom G22 - ⚪ blanc */
+    #define CC1101_PIN_GDO0           25  /* bottom G25 - 🟠 orange */
+    #define CC1101_PIN_GDO2           21  /* bottom G21 - 🟣 violet (optionnel) */
     #define CC1101_SPI_FREQ_HZ  4000000
 
+    /* VCC = 3.3V bottom - 🔴 rouge / GND = bottom - ⚫ noir */
     /* Aucun bouton — tout via MQTT/HA */
 
     /* LED RGB (=WS2812 pin 27) */
