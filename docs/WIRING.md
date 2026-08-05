@@ -17,31 +17,42 @@ Convention couleurs standard pour souder les 7 fils entre **EBYTE E07-900M10S** 
 
 **Convention** : rouge/noir suit le standard électronique universel. Signaux SPI ordre visuel type Ethernet (=jaune/vert/bleu/blanc pour paires).
 
-## Schéma câblage
+## Schéma câblage avec numéros + couleurs
 
 ```
-         ┌────────────────────────────────────────┐
-         │  12  13  14  15  16  17  18  19  20  21 22│  ← rangée HAUT
-         │      ┃  🟠  🟢  🟡  🔵  ⚪   ⚫       │
-         │      Violet                              │
-         │      (optionnel)                         │
-         │       E07 900M10S                        │
-         │       QR • FCC • CE                      │
-         │                              ⓘ IPX      │
-         │  11  10  9   8  7   6   5   4   3   2   1│  ← rangée BAS
-         │           🔴                              │
-         └────────────────────────────────────────┘
+              ── rangée HAUT (=gauche à droite) ──
+       ┌──────────────────────────────────────────────────────┐
+       │  ●   ●   ●   ●   ●   ●   ●   ●   ●   ●   ●          │
+       │ 12  13  14  15  16  17  18  19  20  21  22          │
+       │      —  🟣  🟠  🟢  🟡  🔵  ⚪  ⚫   —   —          │
+       │              G   G   M   M   S   C   G              │
+       │              D   D   I   O   C   S   N              │
+       │              O   O   S   S   K   N   D              │
+       │              2   0   O                              │
+       │                                                     │
+       │            E07 900M10S                              │
+       │            QR • FCC • CE                            │
+       │                                        ⓘ IPX        │
+       │                                                     │
+       │  ●   ●   ●   ●   ●   ●   ●   ●   ●   ●   ●          │
+       │ 11  10   9   8   7   6   5   4   3   2   1          │
+       │  —   —  🔴  —   —   —   —   —   —   —   —          │
+       │         V                                           │
+       │         C                                           │
+       │         C                                           │
+       └──────────────────────────────────────────────────────┘
+              ── rangée BAS (=gauche à droite) ──
 
-           ↓ Fils vers ESP32
+           ↓ Correspondance fils vers ESP32
 
-    🔴 VCC   → ESP32 3.3V
-    ⚫ GND   → ESP32 GND
-    🟡 MOSI  → ESP32 GPIO23
-    🟢 MISO  → ESP32 GPIO19
-    🔵 SCK   → ESP32 GPIO18
-    ⚪ CSN   → ESP32 GPIO5
-    🟠 GDO0  → ESP32 GPIO4
-    🟣 GDO2  → ESP32 GPIO2 (=optionnel)
+    Pin 9  → 🔴 Rouge  → VCC   → ESP32 3.3V
+    Pin 20 → ⚫ Noir   → GND   → ESP32 GND
+    Pin 19 → ⚪ Blanc  → CSN   → ESP32 GPIO5
+    Pin 18 → 🔵 Bleu   → SCK   → ESP32 GPIO18
+    Pin 17 → 🟡 Jaune  → MOSI  → ESP32 GPIO23
+    Pin 16 → 🟢 Vert   → MISO  → ESP32 GPIO19
+    Pin 15 → 🟠 Orange → GDO0  → ESP32 GPIO4
+    Pin 14 → 🟣 Violet → GDO2  → ESP32 GPIO2 (=optionnel)
 ```
 
 ## Ordre soudure recommandé (=du plus critique au moins)
