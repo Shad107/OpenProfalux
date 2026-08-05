@@ -1,45 +1,58 @@
 # OpenProfalux — Wiring convention couleurs fils
 
-Convention couleurs standard pour souder les 7 fils entre **EBYTE E07-900M10S** et **ESP32 DevKit**.
+Convention couleurs standard pour souder **8 fils** entre **EBYTE E07-900M10S** et **M5Stack ATOM Lite** (=cible production) ou **ESP32 DevKit** (=prototype alternatif).
 
-## Table câblage — Target M5Stack ATOM Lite (=Dupont-friendly bottom header)
+## Convention couleurs
 
-| Signal | Couleur fil | Pin E07 | Rangée E07 | Pin M5Stack ATOM Lite | Rôle |
-|--------|-------------|---------|------------|-----------------------|------|
-| **VCC** | 🔴 **Rouge** | 9 | **HAUT** (=milieu) | **3.3V** (bottom) | Alimentation |
-| **GND** | ⚫ **Noir** | 20 (ou 22) | **BAS** (=milieu-droit) | **GND** (bottom) | Masse |
-| **MOSI** | 🟡 **Jaune** | 17 | **BAS** (=milieu) | **G23** (bottom) | SPI data out |
-| **MISO** | 🟢 **Vert** | 16 | **BAS** (=milieu) | **G33** (bottom) | SPI data in |
-| **SCK** | 🔵 **Bleu** | 18 | **BAS** (=milieu) | **G19** (bottom) | SPI clock |
-| **CSN** | ⚪ **Blanc** | 19 | **BAS** (=milieu) | **G22** (bottom) | SPI chip select |
-| **GDO0** | 🟠 **Orange** | 15 | **BAS** (=milieu) | **G25** (bottom) | Data async OOK |
-| GDO2 (optionnel) | 🟣 Violet | 14 | **BAS** (=milieu-gauche) | **G21** (bottom) | Debug (=non requis) |
+Standard électronique universel : rouge/noir pour alim, signaux SPI dans ordre visuel type câbles Ethernet.
 
-## Alternative — Target External (=ESP32 DevKit)
+| # | Fil | Signal | Rôle |
+|---|-----|--------|------|
+| 1 | 🔴 **Rouge** | VCC | Alimentation 3.3V |
+| 2 | ⚫ **Noir** | GND | Masse |
+| 3 | 🟡 **Jaune** | MOSI | SPI data out (=ESP → E07) |
+| 4 | 🟢 **Vert** | MISO | SPI data in (=E07 → ESP) |
+| 5 | 🔵 **Bleu** | SCK | SPI clock |
+| 6 | ⚪ **Blanc** | CSN | SPI chip select |
+| 7 | 🟠 **Orange** | GDO0 | Data async OOK (=KEELOQ critique) |
+| 8 | 🟣 **Violet** | GDO2 | Debug (=optionnel) |
 
-| Signal | Pin E07 | ESP32 DevKit |
-|--------|---------|--------------|
-| VCC | 9 | 3.3V |
-| GND | 20 | GND |
-| MOSI | 17 | GPIO23 |
-| MISO | 16 | GPIO19 |
-| SCK | 18 | GPIO18 |
-| CSN | 19 | GPIO5 |
-| GDO0 | 15 | GPIO4 |
-| GDO2 | 14 | GPIO2 |
+## Table complète — Target M5Stack ATOM Lite (=Dupont-friendly)
+
+**Utilisation** : Dupont femelle-femelle direct sur bottom header ATOM Lite.
+
+| Signal | Couleur | Pin E07 | Pin M5Stack ATOM Lite |
+|--------|---------|---------|-----------------------|
+| VCC | 🔴 Rouge | **9** (=rangée HAUT milieu) | **3.3V** (=bottom) |
+| GND | ⚫ Noir | **20** (=rangée BAS droite) | **GND** (=bottom) |
+| MOSI | 🟡 Jaune | **17** (=rangée BAS milieu) | **G23** (=bottom) |
+| MISO | 🟢 Vert | **16** (=rangée BAS milieu) | **G33** (=bottom) |
+| SCK | 🔵 Bleu | **18** (=rangée BAS milieu) | **G19** (=bottom) |
+| CSN | ⚪ Blanc | **19** (=rangée BAS milieu) | **G22** (=bottom) |
+| GDO0 | 🟠 Orange | **15** (=rangée BAS milieu) | **G25** (=bottom) |
+| GDO2 (opt) | 🟣 Violet | **14** (=rangée BAS milieu-gauche) | **G21** (=bottom) |
+
+## Table complète — Target External (=ESP32 DevKit alternatif)
+
+| Signal | Couleur | Pin E07 | Pin ESP32 DevKit |
+|--------|---------|---------|------------------|
+| VCC | 🔴 Rouge | 9 | 3.3V |
+| GND | ⚫ Noir | 20 | GND |
+| MOSI | 🟡 Jaune | 17 | GPIO23 |
+| MISO | 🟢 Vert | 16 | GPIO19 |
+| SCK | 🔵 Bleu | 18 | GPIO18 |
+| CSN | ⚪ Blanc | 19 | GPIO5 |
+| GDO0 | 🟠 Orange | 15 | GPIO4 |
+| GDO2 | 🟣 Violet | 14 | GPIO2 |
 
 **Compile flag** :
-- `CONFIG_OPENPROFALUX_TARGET_M5STACK=y` → M5Stack ATOM Lite (=production)
-- `CONFIG_OPENPROFALUX_TARGET_EXTERNAL=y` → ESP32 DevKit (=prototype)
+- `CONFIG_OPENPROFALUX_TARGET_M5STACK=y` → M5Stack ATOM Lite
+- `CONFIG_OPENPROFALUX_TARGET_EXTERNAL=y` → ESP32 DevKit
 
-**Convention** : rouge/noir suit le standard électronique universel. Signaux SPI ordre visuel type Ethernet (=jaune/vert/bleu/blanc pour paires).
-
-## Schéma câblage avec numéros + couleurs
-
-Position naturelle : **écriture face + IPX bas-droite**.
+## Schéma E07-900M10S — position naturelle (=écriture face + IPX bas-droite)
 
 ```
-              ── rangée HAUT (=gauche à droite) ──
+              ── rangée HAUT (=pins 11 → 1 gauche→droite) ──
        ┌──────────────────────────────────────────────────────┐
        │  ●   ●   ●   ●   ●   ●   ●   ●   ●   ●   ●          │
        │ 11  10   9   8   7   6   5   4   3   2   1          │
@@ -61,21 +74,44 @@ Position naturelle : **écriture face + IPX bas-droite**.
        │              O   O   S   S   K   N   D              │
        │              2   0   O                              │
        └──────────────────────────────────────────────────────┘
-              ── rangée BAS (=gauche à droite) ──
-
-           ↓ Correspondance fils vers ESP32
-
-    Pin 9  → 🔴 Rouge  → VCC   → ESP32 3.3V
-    Pin 20 → ⚫ Noir   → GND   → ESP32 GND
-    Pin 19 → ⚪ Blanc  → CSN   → ESP32 GPIO5
-    Pin 18 → 🔵 Bleu   → SCK   → ESP32 GPIO18
-    Pin 17 → 🟡 Jaune  → MOSI  → ESP32 GPIO23
-    Pin 16 → 🟢 Vert   → MISO  → ESP32 GPIO19
-    Pin 15 → 🟠 Orange → GDO0  → ESP32 GPIO4
-    Pin 14 → 🟣 Violet → GDO2  → ESP32 GPIO2 (=optionnel)
+              ── rangée BAS (=pins 12 → 22 gauche→droite) ──
 ```
 
+## Schéma M5Stack ATOM Lite — bottom header
+
+```
+                  ┌──────────────────────┐
+                  │                      │
+                  │  ▓▓▓ ATOM Lite ▓▓▓   │
+                  │   ESP32-PICO-D4      │
+                  │                      │
+                  │      [LED]           │
+                  │      [BTN]           │
+                  └──┬─┬─┬─┬─┬─┬─┬─┬─┬──┘
+                     │ │ │ │ │ │ │ │ │
+                     G G G G G G 3 G G
+                    21 25 22 19 33 23 . N 5
+                     │ │ │ │ │ │ 3 D V
+                     │ │ │ │ │ │ V   ← Grove/USB en haut
+                     🟣🟠⚪🔵🟢🟡🔴⚫
+
+    Ordre lecture bottom (=gauche→droite face avant) :
+      Pin 1 : G21 = 🟣 GDO2 (opt.)
+      Pin 2 : G25 = 🟠 GDO0
+      Pin 3 : G22 = ⚪ CSN
+      Pin 4 : G19 = 🔵 SCK
+      Pin 5 : G33 = 🟢 MISO
+      Pin 6 : G23 = 🟡 MOSI
+      Pin 7 : 3.3V = 🔴 VCC
+      Pin 8 : GND = ⚫ GND
+      Pin 9 : 5V  = (=inutilisé pour E07)
+```
+
+**Attention** : l'ordre exact des pins sur le bottom header ATOM Lite peut varier selon la révision. Vérifier avec un multimètre ou la sérigraphie sur le PCB avant de brancher.
+
 ## Ordre soudure recommandé (=du plus critique au moins)
+
+Côté E07 (=SMD 1.27mm castellated, soudure fine) :
 
 1. **🔴 Rouge (VCC pin 9)** — priorité alim
 2. **⚫ Noir (GND pin 20)** — priorité alim
@@ -86,29 +122,39 @@ Position naturelle : **écriture face + IPX bas-droite**.
 7. **🟠 Orange (GDO0 pin 15)** — data KEELOQ critique
 8. 🟣 Violet (GDO2 pin 14) — optionnel debug
 
-## Notes soudure
+Côté M5Stack ATOM Lite : **aucune soudure**, connecteurs Dupont femelle enfichés sur les pins mâles du bottom header.
+
+## Notes soudure côté E07
 
 - **Loupe Anpro 3.5X + LED** conseillée pour SMD 1.27mm
 - **Support 3ème main** pour fixer le module
 - **Étamer chaque pad** avec une micro-goutte avant d'y poser le fil
-- **Fils AWG 28-30** courts (=~10cm) pré-étamés
-- **Colle chaude** ou epoxy après soudure pour robustesse mécanique (=éviter arrachage)
-- **Ne pas connecter GDO2** au premier essai — inutile pour fonctionnement de base
-- **Longueur fils** : garder ~10cm max, sinon parasites SPI possibles à haut débit
+- **Fils AWG 28-30** courts (=~10cm) pré-étamés à une extrémité (=côté E07)
+- **Autre extrémité** : sertir/souder connecteur Dupont femelle
+- **Colle chaude** ou epoxy après soudure pour robustesse mécanique
+- **Longueur fils** : garder ~10-15cm max, sinon parasites SPI possibles
 
 ## Test continuité après soudure
 
 Avec multimètre en mode continuité :
-- Vérifier 🔴 VCC contre 3.3V ESP32 (=bip)
-- Vérifier ⚫ GND contre GND ESP32
-- Vérifier chaque signal SPI (=bip entre pin E07 et GPIO ESP32 correspondante)
-- **Aucun court-circuit** entre 2 signaux (=silence multimètre entre GPIO adjacents)
+- Vérifier 🔴 VCC (=fil rouge) → contre 3.3V ATOM Lite (=bip)
+- Vérifier ⚫ GND (=fil noir) → contre GND ATOM Lite
+- Vérifier chaque signal SPI → contre le pin ATOM Lite correspondant
+- **Aucun court-circuit** entre 2 signaux (=silence multimètre entre pins adjacents E07)
 
-## Vérification firmware
+## Vérification firmware (=après flash)
 
-Après flash + boot, log série doit afficher :
+Au premier boot, log série doit afficher :
 ```
 [cc1101] PARTNUM=0x00 (=expected 0x00 for CC1101)
 ```
 
-Si `PARTNUM != 0x00` ou fail → problème câblage SPI (=vérifier MISO/MOSI inversés, CSN mal soudé, GND commun manquant).
+Si `PARTNUM != 0x00` ou timeout :
+- Vérifier MISO/MOSI **pas inversés** (=erreur la plus fréquente)
+- CSN mal soudé ou fil coupé
+- GND commun manquant entre E07 et ATOM Lite
+- Alim 3.3V absente ou trop faible (=mesurer 3.15-3.35V au multimètre sur pin VCC E07)
+
+## Précaution IPX
+
+Connecteur **U.FL fragile** — **ne pas tirer sur le câble antenne** pour débrancher. Soulever le connecteur perpendiculairement au PCB. ~30 clip/déclip max avant usure.
