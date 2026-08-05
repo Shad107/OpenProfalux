@@ -23,7 +23,7 @@ Standard électronique universel : rouge/noir pour alim, signaux SPI dans ordre 
 
 | Signal | Couleur | Pin E07 | Pin M5Stack ATOM Lite |
 |--------|---------|---------|-----------------------|
-| VCC | 🔴 Rouge | **9** (=rangée HAUT milieu) | **3.3V** (=bottom) |
+| VCC | 🔴 Rouge | **9** (=rangée HAUT milieu) | **5V bottom → régulateur 3.3V externe** ⚠️ |
 | GND | ⚫ Noir | **20** (=rangée BAS droite) | **GND** (=bottom) |
 | MOSI | 🟡 Jaune | **17** (=rangée BAS milieu) | **G23** (=bottom) |
 | MISO | 🟢 Vert | **16** (=rangée BAS milieu) | **G33** (=bottom) |
@@ -48,6 +48,32 @@ Standard électronique universel : rouge/noir pour alim, signaux SPI dans ordre 
 **Compile flag** :
 - `CONFIG_OPENPROFALUX_TARGET_M5STACK=y` → M5Stack ATOM Lite
 - `CONFIG_OPENPROFALUX_TARGET_EXTERNAL=y` → ESP32 DevKit
+
+## ⚠️ ATTENTION — Régulateur 3.3V obligatoire (M5Stack ATOM Lite)
+
+Le M5Stack ATOM Lite **n'expose PAS de 3.3V** sur son bottom header — seulement **5V** (=direct USB) et GND.
+
+Le CC1101 (=chip du E07-900M10S) supporte **1.8-3.6V max**. Le brancher directement en 5V le **détruit immédiatement**.
+
+**Solution obligatoire** : mini régulateur linéaire 3.3V intercalé :
+
+```
+M5Stack ATOM 5V ──┬─► [AMS1117-3.3V] ──► E07 pin 9 (VCC) 🔴
+                  │        │
+                  │        └─►  GND
+M5Stack ATOM GND ─┴──────────────► E07 pin 20 (GND) ⚫
+```
+
+**Modules recommandés** (=~1€, 1×1cm) :
+- **AMS1117-3.3V** breakout : 800mA output, drop 1.3V, très courant AliExpress
+- **HT7333-A LDO** : low-power alternative
+- **MP1584 mini buck** : plus efficace mais légèrement plus cher
+
+**Ne PAS utiliser** :
+- Pin 5V direct vers E07 → destruction immédiate CC1101
+- Divisieur de tension résistif → instable, ondulation courant
+
+L'ESP32 DevKit alternatif n'a pas ce problème — il expose bien 3.3V direct sur un pin dédié.
 
 ## Schéma E07-900M10S — position naturelle (=écriture face + IPX bas-droite)
 
