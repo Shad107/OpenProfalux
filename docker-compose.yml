@@ -1,0 +1,18 @@
+services:
+  esp-idf:
+    build:
+      context: .
+      dockerfile: Dockerfile.esp-idf
+    container_name: openprofalux-esp-idf
+    volumes:
+      - ./firmware:/project/firmware
+      - ./docs:/project/docs
+      - ./README.md:/project/README.md
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0  # ESP32 UART, ajuster selon setup
+    working_dir: /project/firmware
+    environment:
+      - IDF_TARGET=esp32
+    stdin_open: true
+    tty: true
+    command: bash

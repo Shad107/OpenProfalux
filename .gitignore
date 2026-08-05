@@ -1,0 +1,23 @@
+# ESP-IDF build
+firmware/build/
+firmware/managed_components/
+firmware/dependencies.lock
+firmware/sdkconfig
+firmware/sdkconfig.old
+
+# Simulation binaries
+sim/sim_openkeeloq
+sim/sim_openprofalux
+sim/test_keeloq
+sim/*.o
+firmware/main/*.o
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Local secrets (=WiFi, MQTT credentials)
+*.env
+secrets.h
