@@ -1,0 +1,94 @@
+/*
+ * hardware_config.h - Multi-target hardware definitions
+ *
+ * Target External : ESP32-WROOM DevKit + CC1101 breakout externe
+ * Target M5Stack  : M5Stack ATOM Lite (=ESP32-PICO)
+ */
+#ifndef HARDWARE_CONFIG_H
+#define HARDWARE_CONFIG_H
+
+/* ═══════════════════════════════════════════════════════════════
+ * Select target at compile time via sdkconfig or CMake
+ * ═══════════════════════════════════════════════════════════════ */
+
+#if defined(SIM_MODE)
+
+    /* ─── PC simulation - no real hardware ─── */
+    #define TARGET_NAME               "sim"
+    #define CC1101_PIN_CS             (-1)
+    #define CC1101_PIN_GDO0           (-1)
+    #define LED_PIN                   (-1)
+
+#elif defined(CONFIG_OPENPROFALUX_TARGET_EXTERNAL)
+
+    /* ─── Target External: ESP32 DevKit ─── */
+    #define TARGET_NAME               "external"
+
+    /* CC1101 SPI pins (=VSPI par défaut ESP32) */
+    #define CC1101_SPI_HOST           VSPI_HOST
+    #define CC1101_PIN_MISO           19
+    #define CC1101_PIN_MOSI           23
+    #define CC1101_PIN_SCK            18
+    #define CC1101_PIN_CS              5
+    #define CC1101_PIN_GDO0            4  /* Interrupt data */
+    #define CC1101_PIN_GDO2            2  /* Debug (optional) */
+    #define CC1101_SPI_FREQ_HZ  6000000  /* 6 MHz safe */
+
+    /* Optional debug buttons (=disabled by default, trigger via MQTT/HA) */
+    #define BTN_PIN_DEBUG_UP          -1
+    #define BTN_PIN_DEBUG_STOP        -1
+    #define BTN_PIN_DEBUG_DOWN        -1
+
+    /* LED status (=built-in blue LED devkit) */
+    #define LED_PIN                    2
+    #define LED_ACTIVE_HIGH           1
+
+#elif defined(CONFIG_OPENPROFALUX_TARGET_M5STACK)
+
+    /* ─── Target M5Stack ATOM Lite ─── */
+    #define TARGET_NAME               "m5stack_atom"
+
+    /* CC1101 sur Grove connector (=I2C pins reassigned SPI) */
+    #define CC1101_SPI_HOST           HSPI_HOST
+    #define CC1101_PIN_MISO           33  /* Grove Y */
+    #define CC1101_PIN_MOSI           26  /* Grove W (=hardware SPI) */
+    #define CC1101_PIN_SCK            32
+    #define CC1101_PIN_CS             19
+    #define CC1101_PIN_GDO0           22
+    #define CC1101_PIN_GDO2           -1  /* Not used */
+    #define CC1101_SPI_FREQ_HZ  4000000
+
+    /* Aucun bouton — tout via MQTT/HA */
+
+    /* LED RGB (=WS2812 pin 27) */
+    #define LED_PIN                   27
+    #define LED_ACTIVE_HIGH           1
+    #define LED_IS_WS2812             1
+
+#else
+    #error "Please select CONFIG_OPENPROFALUX_TARGET_EXTERNAL or CONFIG_OPENPROFALUX_TARGET_M5STACK"
+#endif
+
+/* ═══════════════════════════════════════════════════════════════
+ * KEELOQ / Profalux constants (=target-independent)
+ * ═══════════════════════════════════════════════════════════════ */
+
+#define PROFALUX_FREQ_HZ          868350000UL
+#define PROFALUX_BIT_TIME_US            650
+#define PROFALUX_PREAMBLE_PULSES         12
+#define PROFALUX_PREAMBLE_US            400
+#define PROFALUX_HEADER_US             4000
+#define PROFALUX_REPEAT_COUNT            10  /* HCS301 typical */
+
+/* Boutons Profalux (=confirmés captures beedec65) */
+#define PFX_BTN_DOWN                   0x01
+#define PFX_BTN_STOP                   0x02
+#define PFX_BTN_UP                     0x04
+#define PFX_BTN_PROG                   0x08  /* Hypothèse: PROG button code */
+
+/* Pair window duration (=60s selon procédure officielle Profalux) */
+#define PROFALUX_PAIR_WINDOW_MS       60000
+#define PROFALUX_PAIR_FRAMES             60  /* 1 par seconde */
+#define PROFALUX_PAIR_DELAY_MS         1000
+
+#endif /* HARDWARE_CONFIG_H */

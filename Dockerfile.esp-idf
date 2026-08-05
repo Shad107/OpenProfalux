@@ -1,0 +1,9 @@
+FROM espressif/idf:v5.2.2
+
+RUN apt-get update && apt-get install -y \
+    git curl vim mosquitto-clients \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /project
+
+CMD ["bash"]
