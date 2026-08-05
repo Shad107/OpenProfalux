@@ -6,22 +6,36 @@ Convention couleurs standard pour souder les 7 fils entre **EBYTE E07-900M10S** 
 
 | Signal | Couleur fil | Pin E07 | Rangée E07 | Pin ESP32 | Rôle |
 |--------|-------------|---------|------------|-----------|------|
-| **VCC** | 🔴 **Rouge** | 9 | Bas (=~milieu) | 3.3V | Alimentation |
-| **GND** | ⚫ **Noir** | 20 (ou 22) | Haut droite | GND | Masse |
-| **MOSI** | 🟡 **Jaune** | 17 | Haut milieu | GPIO23 | SPI data out |
-| **MISO** | 🟢 **Vert** | 16 | Haut milieu | GPIO19 | SPI data in |
-| **SCK** | 🔵 **Bleu** | 18 | Haut milieu | GPIO18 | SPI clock |
-| **CSN** | ⚪ **Blanc** | 19 | Haut milieu | GPIO5 | SPI chip select |
-| **GDO0** | 🟠 **Orange** | 15 | Haut milieu | GPIO4 | Data async OOK |
-| GDO2 (optionnel) | 🟣 Violet | 14 | Haut milieu | GPIO2 | Debug (=non requis) |
+| **VCC** | 🔴 **Rouge** | 9 | **HAUT** (=milieu) | 3.3V | Alimentation |
+| **GND** | ⚫ **Noir** | 20 (ou 22) | **BAS** (=milieu-droit) | GND | Masse |
+| **MOSI** | 🟡 **Jaune** | 17 | **BAS** (=milieu) | GPIO23 | SPI data out |
+| **MISO** | 🟢 **Vert** | 16 | **BAS** (=milieu) | GPIO19 | SPI data in |
+| **SCK** | 🔵 **Bleu** | 18 | **BAS** (=milieu) | GPIO18 | SPI clock |
+| **CSN** | ⚪ **Blanc** | 19 | **BAS** (=milieu) | GPIO5 | SPI chip select |
+| **GDO0** | 🟠 **Orange** | 15 | **BAS** (=milieu) | GPIO4 | Data async OOK |
+| GDO2 (optionnel) | 🟣 Violet | 14 | **BAS** (=milieu-gauche) | GPIO2 | Debug (=non requis) |
 
 **Convention** : rouge/noir suit le standard électronique universel. Signaux SPI ordre visuel type Ethernet (=jaune/vert/bleu/blanc pour paires).
 
 ## Schéma câblage avec numéros + couleurs
 
+Position naturelle : **écriture face + IPX bas-droite**.
+
 ```
               ── rangée HAUT (=gauche à droite) ──
        ┌──────────────────────────────────────────────────────┐
+       │  ●   ●   ●   ●   ●   ●   ●   ●   ●   ●   ●          │
+       │ 11  10   9   8   7   6   5   4   3   2   1          │
+       │      —  🔴  —   —   —   —   —   —   —   —          │
+       │         V                                           │
+       │         C                                           │
+       │         C                                           │
+       │                                                     │
+       │            E07 900M10S                              │
+       │            QR • FCC • CE                            │
+       │                                                     │
+       │                                        ⓘ IPX        │
+       │                                                     │
        │  ●   ●   ●   ●   ●   ●   ●   ●   ●   ●   ●          │
        │ 12  13  14  15  16  17  18  19  20  21  22          │
        │      —  🟣  🟠  🟢  🟡  🔵  ⚪  ⚫   —   —          │
@@ -29,17 +43,6 @@ Convention couleurs standard pour souder les 7 fils entre **EBYTE E07-900M10S** 
        │              D   D   I   O   C   S   N              │
        │              O   O   S   S   K   N   D              │
        │              2   0   O                              │
-       │                                                     │
-       │            E07 900M10S                              │
-       │            QR • FCC • CE                            │
-       │                                        ⓘ IPX        │
-       │                                                     │
-       │  ●   ●   ●   ●   ●   ●   ●   ●   ●   ●   ●          │
-       │ 11  10   9   8   7   6   5   4   3   2   1          │
-       │  —   —  🔴  —   —   —   —   —   —   —   —          │
-       │         V                                           │
-       │         C                                           │
-       │         C                                           │
        └──────────────────────────────────────────────────────┘
               ── rangée BAS (=gauche à droite) ──
 
