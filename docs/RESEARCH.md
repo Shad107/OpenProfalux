@@ -121,3 +121,25 @@ Le user a corrigé mes conclusions à plusieurs reprises. À retenir :
 ## Verdict final consolidé
 
 **Ton ESP32+CC1101 peut probablement piloter tes 5 volets Profalux à ~0€ hardware** via reproduction du protocole Chamberlain-like. Le test empirique sur un volet (=chambre invitée) tranche définitivement en une session de 30 min.
+
+---
+
+## Mise à jour 2026-08-06 — formulation robuste post-contre-analyse
+
+Après [contre-analyse « 10e homme »](CONTRE-ANALYSE.md), reformulation scientifique de la conclusion :
+
+**Formulation antérieure (=trop forte)** :
+> Le fait que PFX soit `clone=3` prouve que Profalux n'utilise pas un décodeur KeeLoq standard et que le moteur apprend une clé arbitraire sans manufacturer key.
+
+**Formulation robuste** :
+> Les observations DEVMEL démontrent une procédure PFX persistante spécifique, distincte du clonage KeeLoq générique. L'absence de clé ou de dérivation visible dans les couches applicatives analysées est compatible avec un apprentissage propriétaire sans manufacturer key, mais ne permet pas encore de distinguer ce scénario d'une capacité cryptographique cachée, préprovisionnée ou distante située dans une couche radio non analysée.
+
+**6 hypothèses adverses restent compatibles** avec toutes les preuves accumulées :
+- A (30%) — Capacité crypto dans firmware radio AirSend non extrait
+- B (20%) — Identités PFX préprovisionnées côté BOX
+- C (7%) — Provisionnement cloud
+- D (15%) — Dérivation Profalux faible ou publique
+- E (25%) — Séquence propriétaire de transfert de clé
+- F (3%) — Cassage RF dynamique KEELOQ
+
+Voir [PAIRING.md](PAIRING.md) pour le plan test empirique discriminant qui vise à trancher entre ces hypothèses.
