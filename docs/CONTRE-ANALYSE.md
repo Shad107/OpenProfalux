@@ -564,3 +564,25 @@ Confirme que Profalux a migré vers Zigbee sur nouvelles télécommandes. Les mo
 - Via Frida hook sur méthodes `Channel::setSeed/setSource/setCounter/setToken/setMac`
 - Capturer valeurs en runtime pendant un vrai appairage
 - Interprétation : si `seed != 0` juste avant `transfer()` → seed effectivement utilisé, mécanisme Secure Learn variant confirmé
+
+---
+
+## Rétractation 2026-08-06 (=2ème fork vérification)
+
+L'addendum précédent basait le réhausse de l'hypothèse E sur `setSeed()`. Le fork de vérification confirme que **`setSeed` est un setter trivial 5 instructions** — pas une signature Secure Learn.
+
+Classement révisé :
+
+| Hypothèse | Nouveau ranking | Note |
+|-----------|-----------------|------|
+| A firmware radio séparé | **30% ↑** | Confirmé par absence de crypto dans SDK + port 8820 vers BOX |
+| E séquence propriétaire | 25% | Toujours plausible mais sans support empirique renforcé |
+| B préprovisionnement | 20% | inchangé |
+| D dérivation faible | 15% | inchangé |
+| G Chamberlain Bidirectional | **5% ↓** | Perte du support setSeed |
+| C cloud | 5% | inchangé |
+| F cassage RF | 3% | inchangé |
+
+L'hypothèse A (=**firmware radio séparé dans la BOX AirSend physique qui fait la crypto**) redevient la plus probable. Le service Linux DEVMEL et le SDK Android ne contiennent probablement **pas** la logique crypto — elle est dans le firmware BOX physique qui écoute port 8820 UDP.
+
+**Test discriminant supplémentaire** : capture UDP live port 8820 entre app AirSend (=Android AVD) et faux endpoint BOX pour reverse le format binaire.

@@ -133,3 +133,18 @@ Table décisionnelle Phase 1 :
 | Peu de trames + long silence | Communication cloud ou firmware radio | Vérifier hypothèse A/C via test réseau isolé |
 
 **Ne pas court-circuiter Phase 1** — l'échec de la théorie initiale rend l'observation empirique **plus critique** que jamais.
+
+---
+
+## Rétractation 2026-08-06 sur Phase 1 diagnostic
+
+La table décisionnelle Phase 1 mentionnait "Séquence 2-3 trames différentes en début → Secure Learn variant (=seed transmis en clair)" basée sur la découverte `setSeed()`. Cette découverte étant **rétractée** (=setSeed est un setter trivial), l'interprétation doit être neutralisée :
+
+| Observation RX passive | Diagnostic révisé |
+|-----------------------|-------------------|
+| Toutes trames 66-bit HCS301 identiques | Chamberlain stricte possible OU firmware BOX fait crypto en amont |
+| Séquence 2-3 trames différentes en début | **Structure propriétaire à reverser** (=pas assumer Secure Learn) |
+| Trames hors format HCS301 | Protocole propriétaire, reverse nécessaire |
+| Peu de trames + silence | Cloud ou firmware radio séparé (=hypothèses A/C) |
+
+L'hypothèse A (=firmware BOX physique fait la crypto) étant maintenant la plus probable (=30%), il est important d'observer **si la BOX AirSend fait un burst RF cohérent ou si elle attend des instructions du cloud/service**.
