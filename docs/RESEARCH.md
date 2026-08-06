@@ -143,3 +143,43 @@ Après [contre-analyse « 10e homme »](CONTRE-ANALYSE.md), reformulation scient
 - F (3%) — Cassage RF dynamique KEELOQ
 
 Voir [PAIRING.md](PAIRING.md) pour le plan test empirique discriminant qui vise à trancher entre ces hypothèses.
+
+---
+
+## Update 2026-08-06 (=fork "piste logicielle forcée") — 3 nuances
+
+### Nuance 1 — Blob 221KB n'est pas uniforme
+
+Diff arm64 vs x86_64 : 18.6 KB identiques début (=tables statiques arch-indépendantes) puis 200 KB divergents. **8.9% identique au total**.
+
+Interprétation révisée : blob = ~18 KB tables statiques + ~200 KB **code compilé arch-spécifique** dans `.rodata`. Pas des précomputations XXTEA pures comme initialement conclu.
+
+### Nuance 2 — `Channel::setSeed(uint32_t)` existe → Secure Learn
+
+Symbols ARM64 révèlent que `Channel` a 5 champs :
+- `setSource(uint32_t)` — serial 28-bit
+- `setCounter(uint32_t)` — rolling counter
+- `setToken(uint32_t)`
+- `setMac(uint32_t)`
+- **`setSeed(uint32_t)`** — signature Secure Learn
+
+**Impact** : contredit l'hypothèse "Chamberlain Self-Learn stricte" (=n'importe quelle trame acceptée). DEVMEL manipule un **seed** dans son objet Channel — ce qui oriente vers **Secure Learn variant**.
+
+**Piste alternative** : Chamberlain Self-Learn **Bidirectional** — le seed n'est pas MFG-derived, il est choisi par l'émetteur pendant l'appairage. Le récepteur note (serial, counter) à réception + convient le seed pour dériver crypt_key par échange bidirectionnel avec la télécommande.
+
+### Nuance 3 — OTA PFX_TS_ZB_3_0-Rev35 = pur Zigbee
+
+Payload ARM Cortex-M extrait, 0 hit KEELOQ/PFX/key/seed. Confirme migration Profalux vers Zigbee sur nouvelles télécommandes (~2019+). Moteurs 2009 restent sur KEELOQ 868 MHz — le legacy path reste pertinent pour OpenProfalux.
+
+### Impact sur Phase 1 empirique
+
+**Phase 1 RX passive reste priorité absolue** — c'est le seul moyen empirique de trancher :
+
+| Observation Phase 1 | Hypothèse renforcée |
+|--------------------|---------------------|
+| Trames toutes 66-bit HCS301 standard | Chamberlain Self-Learn stricte (=hypothèse initiale) |
+| Trames étendues avec seed 32/60-bit visible | Secure Learn variant + seed échangé |
+| Trames hors format HCS301 (=protocole propriétaire) | Hypothèse E de la contre-analyse |
+| Pas de trame d'appairage dédiée | Préprovisionnement ou firmware radio séparé |
+
+La signature RF observée sur le burst DEVMEL trancherait immédiatement.

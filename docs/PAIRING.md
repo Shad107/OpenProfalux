@@ -111,3 +111,25 @@ Selon les résultats, mettre à jour :
 - `CONTRE-ANALYSE.md` avec les hypothèses éliminées et celles renforcées
 - `docs/RESEARCH.md` avec les preuves empiriques ajoutées
 - `firmware/main/profalux.c` selon la vraie procédure identifiée
+
+---
+
+## Update 2026-08-06 — décision Phase 1 basée sur observations
+
+Suite au fork "piste logicielle forcée" qui a révélé `Channel::setSeed()`, la Phase 1 doit **spécifiquement chercher** :
+
+1. **Longueur trames observées** — 66-bit HCS301 standard OU longueur étendue ?
+2. **Champ seed visible** — si une trame contient 32-60 bits identifiables comme seed en clair (=pattern non-encrypted au milieu)
+3. **Ordre des trames** — seed émis d'abord, puis trames rolling, ou l'inverse ?
+4. **Structure protocole** — trames identiques répétées (=simple burst) ou séquence structurée (=state machine) ?
+
+Table décisionnelle Phase 1 :
+
+| Observation | Diagnostic | Suite recommandée |
+|-------------|-----------|-------------------|
+| Toutes trames 66-bit identiques structurellement | Chamberlain Self-Learn stricte possible | Phase 2 : émettre burst identique avec clé random |
+| Séquence de 2-3 trames différentes en début | Secure Learn variant probable | Reverse structure trame seed, implémenter dans firmware |
+| Trames hors format HCS301 (=magic, structure inconnue) | Protocole propriétaire | Reverse complet nécessaire avant test empirique |
+| Peu de trames + long silence | Communication cloud ou firmware radio | Vérifier hypothèse A/C via test réseau isolé |
+
+**Ne pas court-circuiter Phase 1** — l'échec de la théorie initiale rend l'observation empirique **plus critique** que jamais.

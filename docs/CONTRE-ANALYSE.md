@@ -525,3 +525,42 @@ Elles n’ont pas encore éliminé :
 Le test décisif reste l’enrôlement d’un émetteur dont le serial, la seed, la clé et le compteur sont entièrement contrôlés, associé à une capture RF complète de la procédure AirSend.
 
 > Tant que ce test n’est pas positif, l’hypothèse d’apprentissage arbitraire doit rester l’hypothèse principale du prototype, pas un fait établi.
+
+---
+
+## Addendum 2026-08-06 — nouvelles preuves logicielles
+
+Un fork d'analyse en profondeur a révélé 3 nuances qui modifient le classement des hypothèses :
+
+### 1. Blob 221KB = tables statiques + code arch-spécifique
+
+Diff arm64 vs x86_64 : 18.6 KB identiques (=tables) puis 200 KB divergents (=code). Le blob n'est **pas** une précomputation XXTEA pure — il contient probablement du code compilé Profalux-spécifique inclus dans `.rodata` pour raisons d'optimisation/protection. Nécessite reverse plus approfondi.
+
+### 2. `Channel::setSeed(uint32_t)` — signature Secure Learn
+
+Symbol ARM64 révèle 5 champs Channel dont `setSeed`. Ceci **contredit partiellement l'hypothèse Chamberlain Self-Learn stricte** (=hypothèse antérieurement principale). Le mécanisme réel manipule un `seed` pendant l'appairage.
+
+**Réévaluation classement provisoire** :
+
+| Hypothèse | Estimation précédente | Nouvelle |
+|-----------|----------------------|----------|
+| A — Firmware radio séparé | 30% | **20%** |
+| B — Identités préprovisionnées | 20% | 20% |
+| C — Provisionnement cloud | 7% | 5% |
+| D — Dérivation faible/publique | 15% | 15% |
+| E — Séquence propriétaire transfert clé | 25% | **30%** ↑ |
+| F — Cassage RF dynamique | 3% | 3% |
+| **G (nouvelle)** — Chamberlain Self-Learn **Bidirectional** avec seed | — | **7%** |
+
+**L'hypothèse E renforcée** : la séquence propriétaire de transfert de clé impliquerait probablement l'envoi d'un seed avant les trames rolling. `setSeed()` API confirme que DEVMEL structure sa data autour d'un seed.
+
+### 3. OTA Silicon Labs Zigbee 2019+ pur Zigbee
+
+Confirme que Profalux a migré vers Zigbee sur nouvelles télécommandes. Les moteurs 2009 restent sur legacy KEELOQ — pertinent pour le projet.
+
+### Nouveau test discriminant (=à ajouter à la matrice section 8)
+
+**Test 7 — Vérifier structure Channel côté DEVMEL** :
+- Via Frida hook sur méthodes `Channel::setSeed/setSource/setCounter/setToken/setMac`
+- Capturer valeurs en runtime pendant un vrai appairage
+- Interprétation : si `seed != 0` juste avant `transfer()` → seed effectivement utilisé, mécanisme Secure Learn variant confirmé
