@@ -183,3 +183,71 @@ Payload ARM Cortex-M extrait, 0 hit KEELOQ/PFX/key/seed. Confirme migration Prof
 | Pas de trame d'appairage dédiée | Préprovisionnement ou firmware radio séparé |
 
 La signature RF observée sur le burst DEVMEL trancherait immédiatement.
+
+---
+
+## Rétractation 2026-08-06 — vérification approfondie 2ème fork
+
+Un fork de vérification a réfuté **2 des 3 découvertes** du fork précédent. Corrections :
+
+### ❌ RÉTRACTATION 1 — `Channel::setSeed()` n'est PAS une signature Secure Learn
+
+Disasm à vaddr 0xad20 (x86_64) révèle 5 instructions triviales identiques à `setSource/setToken/setMac` :
+```
+mov rax, [rdi]      ; load pImpl
+test rax, rax
+je +0x10
+mov [rax+0x38], rsi ; write seed field
+or [rax+0x40], 0x20 ; set flag bit 5
+ret
+```
+
+`setSeed` est un **setter data-holder générique**, aucune logique crypto. Le fait qu'un champ `seed` existe dans la struct Channel ne prouve rien sur le mécanisme d'apprentissage.
+
+### ❌ RÉTRACTATION 2 — Blob 200 KB divergent = data pseudo-random, PAS du code
+
+Analyse rigoureuse :
+- **Entropie 7.997/8.0** (=quasi-parfaite random)
+- **Compression zlib 99.8%** (=incompressible)
+- **0 pattern instruction ARM64 valide** (`d65f03c0` RET, STP prologue)
+- **0 pattern instruction x86_64 valide** (`endbr64`, `push rbp; mov rbp,rsp`)
+
+Verdict : c'est de la **DATA pseudo-random** — probablement précomputations cryptographiques (XXTEA/AES round keys) différentes par arch au build time. **Cohérent avec la conclusion originale "précomputations crypto"** que j'avais révisée à tort.
+
+### ✅ Confirmé 3 — OTA `PFX_TS_ZB_3_0-Rev35` = pur Zigbee, 0 hit KEELOQ
+
+Cette découverte tient. Migration Profalux vers Zigbee sur nouvelles télécommandes confirmée.
+
+### Impact classement hypothèses
+
+| Hypothèse | Précédent | Corrigé |
+|-----------|-----------|---------|
+| **A firmware radio séparé** | 20% | **30% ↑** |
+| E séquence propriétaire | 30% | 25% |
+| B préprovisionnement | 20% | 20% |
+| D dérivation faible | 15% | 15% |
+| G Chamberlain Bidirectional | 7% | **5% ↓** |
+| C cloud | 5% | 5% |
+| F cassage RF | 3% | 3% |
+
+### Structure Channel confirmée (=72 bytes)
+
+| Offset | Champ | Type |
+|--------|-------|------|
+| 0x00 | id | uint16 (=protocol dispatch) |
+| 0x08 | source | uint64 (=serial 28-bit) |
+| 0x18 | counter | uint32 |
+| 0x1c | duration | uint32 |
+| 0x28 | mac | uint128 |
+| 0x38 | seed | uint64 |
+| 0x40 | flags | uint8 (=has* bitmap) |
+
+### Nouvelles infos utiles
+
+- **Port UDP 8820** identifié comme port BOX (=strings binary)
+- **sp://** = URI scheme d'authentification bearer, pas protocole binaire
+- **APK Android AirSend** téléchargeable via apkpure (=fork dédié à faire pour décompiler)
+
+### Leçon méthodologique
+
+Ne pas prendre les symboles nommés au pied de la lettre. Un symbol `setSeed` peut être un setter trivial. Il faut **toujours** vérifier via disasm (=`objdump -d`, radare2 `pdf`) avant de conclure sur la sémantique.
