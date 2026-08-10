@@ -72,7 +72,10 @@ Voies logicielles épuisées :
 - Ma mémoire propage HCS301 depuis 2026-06-27
 - HCS301 = seul avec **Secure Learn** support (=cohérent avec variantes propriétaires)
 - Frame 66-bit (=2 status + 4 button + 28 serial + 32 encrypted)
-- Fréquence 868.350 MHz OOK confirmée via captures Flipper beedec65
+- Modulation OOK confirmée par mesure sur banc ESP32+CC1101 (2026-08-10). En
+  revanche la fréquence n'est PAS 868.350 : mesurée à **868.425 MHz**, deux
+  méthodes concordantes. Voir `docs/MESURES-RF.md`. La valeur 868.350 issue des
+  captures Flipper beedec65 était fausse de 75 kHz.
 
 **HCS310 N'EXISTE PAS** (=confusion Google avec HCS300/301/320).
 

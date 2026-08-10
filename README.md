@@ -10,21 +10,26 @@ Voir aussi `docs/RESEARCH.md` pour la synthèse technique de la session recherch
 
 | Marque | Protocole | Statut |
 |--------|-----------|--------|
-| **Profalux** (=EMPX-B1, Noé, EMPEPX4, EMPXMUR) | KEELOQ 868.35 MHz OOK Chamberlain-like | **Target primaire** |
+| **Profalux** (=EMPX-B1, Noé, EMPEPX4, EMPXMUR) | KEELOQ **868.425 MHz** OOK (mesuré 2026-08-10, cf docs/MESURES-RF.md) | **Target primaire** |
 | Delta Dore X2D | Variante 868 MHz | Extension future (=clone=3 confirmé DEVMEL) |
 | Delta Dore X3D | Variante 868.95 MHz FSK | Extension future |
 | France Fermetures LIBRIO | Même stack Stella que Profalux | Compat naturelle (=même MFG key groupe) |
 
-## Hypothèse validée
+## Hypothèse de travail (NON validée empiriquement)
 
-DEVMEL AirSend Duo pilote officiellement Profalux via `clone=3 FULL` (=documenté OpenAPI DEVMEL + symbol C++ `DevmelSDK::content::Channel::isCloneable`). Ce mode implique que Profalux implémente une variante Chamberlain Self-Learn (=US 5686904) où :
+> **Statut au 2026-08-10** : ce qui suit est une hypothèse déduite du binaire
+> DEVMEL, pas un fait établi. Deux points la fragilisent :
+>
+> 1. Le point « aucune MFG key nécessaire » **contredit le code de ce dépôt** :
+>    `firmware/main/pfx_keys.c` est justement une table de 15 clés fabricant
+>    Profalux sélectionnées par index. Les deux ne peuvent pas être vrais
+>    ensemble. Les modes d'apprentissage KeeLoq standard (simple, normal,
+>    secure) exigent tous la MFG key, côté encodeur ET décodeur.
+> 2. La vérification empirique de ces clés contre des trames réelles captées le
+>    2026-08-10 a **échoué** : elles ne déchiffrent pas. Voir
+>    `OpenProfalux-Research/captures/2026-08-10-profalux-868/VERIFICATION.md`.
 
-- Décodeur moteur accepte n'importe quel nouvel émetteur pendant la fenêtre 60s learn
-- Nouvel émetteur émet trames KEELOQ avec (serial random, crypt_key random)
-- Décodeur stocke direct (=pas de dérivation via MFG key)
-- **Aucune MFG key partagée nécessaire**
-
-Un ESP32+CC1101 peut donc suivre exactement le même protocole.
+DEVMEL AirSend Duo pilote officiellement Profalux via `clone=3 FULL` (=documenté OpenAPI DEVMEL + symbol C++ `DevmelSDK::content::Channel::isCloneable`). L'interprétation initiale était que Profalux implémente une variante Chamberlain Self-Learn (=US 5686904) sans MFG key partagée. Mais la présence même des clés PFX dans le binaire DEVMEL suggère l'inverse : **DEVMEL détient la MFG key et clone grâce à elle**. La question de savoir si le moteur accepte un émetteur à clé arbitraire reste ouverte, à trancher par un essai d'appairage réel.
 
 ## Architecture dual-target (=inspiration OpenXtraflame)
 
