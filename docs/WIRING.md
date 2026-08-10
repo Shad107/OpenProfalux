@@ -49,24 +49,23 @@ Standard électronique universel : rouge/noir pour alim, signaux SPI dans ordre 
 - `CONFIG_OPENPROFALUX_TARGET_M5STACK=y` → M5Stack ATOM Lite
 - `CONFIG_OPENPROFALUX_TARGET_EXTERNAL=y` → ESP32 DevKit
 
-## ⚠️ ATTENTION — Régulateur 3.3V obligatoire (M5Stack ATOM Lite)
+## Alimentation 3.3V (M5Stack ATOM Lite)
 
-Le M5Stack ATOM Lite **n'expose PAS de 3.3V** sur son bottom header — seulement **5V** (=direct USB) et GND.
+**CORRECTION 2026-08-09** : le M5Stack ATOM Lite **expose bien un pin `3V3`** (coin haut-gauche
+du bottom header, confirmé sur la sérigraphie de la carte). On alimente donc le module RF
+**directement en 3V3, régulateur NON nécessaire**.
 
-Le CC1101 (=chip du E07-900M10S) supporte **1.8-3.6V max**. Le brancher directement en 5V le **détruit immédiatement**.
-
-**Solution obligatoire** : mini régulateur linéaire 3.3V intercalé :
+⚠️ Le CC1101 supporte **1.8-3.6V max** → **jamais** le brancher en 5V (destruction immédiate).
+Toujours vérifier au multimètre que le pin utilisé sort bien ~3,3 V avant de connecter le VCC.
+(Une mesure antérieure sur le pin **5V** avait fait croire à tort qu'il n'y avait pas de 3.3V.)
 
 ```
-M5Stack ATOM 5V ──┬─► [AMS1117-3.3V] ──► E07 pin 9 (VCC) 🔴
-                  │        │
-                  │        └─►  GND
-M5Stack ATOM GND ─┴──────────────► E07 pin 20 (GND) ⚫
+M5Stack ATOM 3V3 ──────────► module VCC 🔴
+M5Stack ATOM GND ──────────► module GND ⚫
 ```
 
-**Modules recommandés** (=~1€, 1×1cm) :
-- **AMS1117-3.3V** breakout : 800mA output, drop 1.3V, très courant AliExpress
-- **HT7333-A LDO** : low-power alternative
+Régulateur 5V→3,3V (AMS1117 / HT7333) = **optionnel**, utile seulement si on alimente le module
+depuis une source 5V sans 3V3 disponible (ce qui n'est pas le cas de l'ATOM Lite).
 - **MP1584 mini buck** : plus efficace mais légèrement plus cher
 
 **Ne PAS utiliser** :
@@ -128,10 +127,14 @@ L'ESP32 DevKit alternatif n'a pas ce problème — il expose bien 3.3V direct su
       Pin 4 : G19 = 🔵 SCK
       Pin 5 : G33 = 🟢 MISO
       Pin 6 : G23 = 🟡 MOSI
-      Pin 7 : 3.3V = 🔴 VCC
+      Pin 7 : 3.3V = 🔴 VCC (pin 3V3 du bottom header — alim directe du module RF)
       Pin 8 : GND = ⚫ GND
-      Pin 9 : 5V  = (=inutilisé pour E07)
 ```
+
+> **CORRECTION 2026-08-09** : l'ATOM Lite **expose bien un pin `3V3`** (coin haut-gauche,
+> sérigraphie). Le VCC du module RF va **directement dessus, sans régulateur**. Les signaux
+> SPI vont direct sur les GPIO (logique 3,3 V native ESP32). TOUJOURS vérifier au multimètre
+> (DCV, rouge sur 3V3, noir sur GND) que le pin sort ~3,3 V avant de brancher le VCC.
 
 **Attention** : l'ordre exact des pins sur le bottom header ATOM Lite peut varier selon la révision. Vérifier avec un multimètre ou la sérigraphie sur le PCB avant de brancher.
 

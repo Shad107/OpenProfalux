@@ -77,13 +77,13 @@ Contenu EEPROM HCS301 (= 192 bits total = 12 mots 16-bit) :
 
 **Le Manufacturer Code lui-même n'est PAS stocké dans la puce**. Il ne sert qu'UNE fois au moment de la programmation d'usine, pour dériver la crypt key à partir du serial (algo Simple/Normal/Secure Learn selon le vendor). Ensuite seule la crypt key dérivée reste dans le HCS301.
 
-Implications lecture P1-P4 :
-- Protocole publié dans datasheet HCS301 (= DS21143C.pdf) + AN41256A.pdf
-- Programmateur ~30€ + 30 min de test
-- Si Profalux n'a PAS activé EE_LOCK : lecture de la **crypt key + serial + counter de CETTE remote seulement** (= permet de la cloner)
-- Ne donne PAS la manufacturer key Profalux (= elle vit uniquement chez Profalux SAS + dans les récepteurs des moteurs)
-- Si EE_LOCK actif (= probable 80-90% en industriel) : chip refuse, lecture impossible sans destruction
-- Probabilité succès : 10-20%
+Implications P1-P4, corrigées après relecture de la section 6 de la datasheet :
+- Le HCS301 n'a pas de bit `EE_LOCK` rendant optionnelle la lecture d'une puce déjà programmée.
+- La fonction Verify n'est disponible qu'une fois, immédiatement après le cycle Program.
+- Entrer dans le cycle Program provoque d'abord un bulk write qui met l'EEPROM à zéro.
+- Il n'existe donc pas de commande documentée de lecture non destructive de la crypt key d'un HCS301 en service.
+- Les P1-P4 servent à programmer puis vérifier en usine, pas à dumper ultérieurement une télécommande.
+- Une extraction de la clé existante exige une attaque hors protocole documenté (=DPA, invasive ou vulnérabilité silicium).
 
 **Ce qu'on gagne avec la crypt key extraite** :
 - Clone électronique de CETTE remote sacrifiée = émettre des rolling codes valides pour les moteurs déjà appairés à elle
@@ -1060,7 +1060,7 @@ Le binaire connaît les NOMS des états mais N'IMPLÉMENTE PAS la logique RF (= 
 - **Verdict** : binary Linux ne contient PAS les clés Profalux (= elles sont dans la BOX hardware)
 
 **Comment DEVMEL aurait obtenu la key Profalux** (= speculation) :
-- 80% probable : extraction (DPA récepteur Profalux ~$300, ou partenariat commercial Profalux français, ou lecture HCS301 EE_LOCK off, ou hardware reverse remote)
+- 80% probable : extraction (DPA récepteur Profalux ~$300, partenariat commercial Profalux français ou reverse du matériel radio ; pas par lecture standard HCS301)
 - 20% probable : Profalux utilise Secure Learn scheme C (= crypt_key = seed direct sans manufacturer key)
 - Confirmer nécessiterait Plan D test ou capture protocole BOX
 
@@ -1132,7 +1132,7 @@ Projets existants qui parlent au dongle/box :
 |---|---|---|---|---|
 | Plan A : Sacrifice Noé + PCB DREVET | 0-30€ | 1-2h | 100% | ⭐ Reco. Voir [[ha-projet-volets-profalux]] |
 | l0ad/profalux2Esphome + spare EMPX-B1 | 35-70€ | 2-3h | 100% | Si pas sacrifier Noé |
-| Test HCS301 read EE_LOCK | 30€ | 30 min | 10-20% | À tenter AVANT sacrifice si curiosité |
+| Lecture standard HCS301 | n/a | n/a | 0% | Verify seulement après Program, lequel efface d'abord l'EEPROM |
 | ChipWhisperer-Nano DPA device key | 55€+spare | 50-100h | 50-70% | ⚠️ Donne device key d'UNE remote, pas manufacturer key. Strategically inutile vs Plan A. Hobby SCA OK |
 | ChipWhisperer-Lite DPA | 300€+spare | 30-50h | 70-80% | Idem Nano mais cleaner. Inutile vs Plan A |
 | ChipWhisperer DPA récepteur (= moteur) | 300-500€ | Multi-mois | Inconnu | ⚠️ Surface attaque Profalux non-standard, jamais reproduit hobby |

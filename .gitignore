@@ -21,3 +21,4 @@ firmware/main/*.o
 # Local secrets (=WiFi, MQTT credentials)
 *.env
 secrets.h
+*.kate-swp

@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <inttypes.h>
 #include "keeloq.h"
+#include "pfx_keys.h"
 
 static int passed = 0, failed = 0;
 
@@ -70,6 +71,31 @@ int main(void) {
     uint32_t enc = keeloq_encrypt(original, key1);
     uint32_t dec = keeloq_decrypt(enc, key1);
     check_u32("decrypt(encrypt(0xDEADBEEF))", dec, original);
+
+    /* Test 5: ancrage DEVMEL - le decrypt doit etre byte-identique au binaire
+     * AirSendWebService (528-loop @0x5059e9 force en gdb, session reverse). */
+    printf("\n[Ancrage DEVMEL]\n");
+    uint32_t dvm = keeloq_decrypt(0x12345678u, 0xabcdef0123456789ULL);
+    check_u32("decrypt(0x12345678, 0xabcdef..) == DEVMEL", dvm, 0x7CC862BEu);
+
+    /* Test 6: selection cle PFX par serial (table obfusquee 0x971010) +
+     * roundtrip sur les 15 cles deobfusquees. */
+    printf("\n[Selection cle PFX + roundtrip 15 cles]\n");
+    uint64_t k0 = 0; uint8_t i0 = 0xFF;
+    bool ok0 = pfx_key_for_serial(0x0467u, &k0, &i0);   /* index 0 */
+    check_u32("pfx serial 0x0467 -> index", (ok0 ? i0 : 0xFF), 0);
+    check_u64("pfx serial 0x0467 -> crypt_key", k0, 0x9265e3d993576bc7ULL);
+    /* serial non-PFX (mauvais marqueur) doit etre rejete */
+    check_u32("pfx serial 0x0400 rejete (pas 0x067)",
+              pfx_key_for_serial(0x0400u, &k0, &i0) ? 1 : 0, 0);
+    int rt_ok = 1;
+    for (uint32_t idx = 0; idx < 15; idx++) {
+        uint32_t serial = ((idx + 1) << 10) | PFX_FAMILY_MARKER;
+        uint64_t k; if (!pfx_key_for_serial(serial, &k, NULL)) { rt_ok = 0; break; }
+        uint32_t P = 0x0abc0007u ^ (idx << 20);
+        if (keeloq_decrypt(keeloq_encrypt(P, k), k) != P) { rt_ok = 0; break; }
+    }
+    check_u32("roundtrip encrypt/decrypt sur 15 cles PFX", rt_ok, 1);
 
     printf("\n=== Results: %d passed, %d failed ===\n", passed, failed);
     return failed == 0 ? 0 : 1;
