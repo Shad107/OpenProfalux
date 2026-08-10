@@ -7,6 +7,11 @@
 #ifndef HARDWARE_CONFIG_H
 #define HARDWARE_CONFIG_H
 
+/* Indispensable : les CONFIG_OPENPROFALUX_TARGET_* viennent de la. Sans cet
+ * include, tout fichier qui inclut hardware_config.h avant un en-tete IDF
+ * (profalux.c, mqtt_bridge.c) declenche le #error de fin de fichier. */
+#include "sdkconfig.h"
+
 /* ═══════════════════════════════════════════════════════════════
  * Select target at compile time via sdkconfig or CMake
  * ═══════════════════════════════════════════════════════════════ */
