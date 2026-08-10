@@ -54,10 +54,10 @@ static void publish_state(const char *last_cmd) {
     snprintf(json, sizeof(json),
         "{\"serial\":\"0x%08X\",\"counter\":%u,\"last_cmd\":\"%s\","
          "\"rssi\":%d,\"free_heap\":%u}",
-        g_state.serial, g_state.counter, last_cmd,
+        (unsigned)g_state.serial, (unsigned)g_state.counter, last_cmd,
         wifi_bridge_rssi(), (unsigned)esp_get_free_heap_size());
     mqtt_pub_state(s_device_name, json);
-    ESP_LOGI(TAG, "State published: counter=%u last=%s", g_state.counter, last_cmd);
+    ESP_LOGI(TAG, "State published: counter=%u last=%s", (unsigned)g_state.counter, last_cmd);
 }
 
 /* ────── MQTT handlers ────── */
@@ -97,9 +97,11 @@ static void rx_frame_cb(const uint8_t *frame, size_t bits, int8_t rssi) {
     snprintf(json, sizeof(json),
         "{\"serial\":\"0x%08X\",\"button\":%u,\"encrypted_hop\":\"0x%08X\","
          "\"status\":%u,\"rssi\":%d}",
-        rxf.serial, rxf.button, rxf.encrypted_hop, rxf.status_flags, rssi);
+        (unsigned)rxf.serial, rxf.button, (unsigned)rxf.encrypted_hop,
+        rxf.status_flags, rssi);
     mqtt_pub_rx_frame(json);
-    ESP_LOGI(TAG, "◀ RX serial=0x%08X btn=%u rssi=%d", rxf.serial, rxf.button, rssi);
+    ESP_LOGI(TAG, "◀ RX serial=0x%08X btn=%u rssi=%d",
+             (unsigned)rxf.serial, rxf.button, rssi);
 }
 
 static void on_listen_start(void) {

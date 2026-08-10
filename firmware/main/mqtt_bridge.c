@@ -1,4 +1,5 @@
 #include "mqtt_bridge.h"
+#include "hardware_config.h"   /* TARGET_NAME, utilise ligne 130 */
 #include <string.h>
 #include <stdio.h>
 #include <mqtt_client.h>
@@ -114,7 +115,7 @@ int mqtt_pub_pair_result(const char *device, bool ok, uint32_t frames) {
     snprintf(topic, sizeof(topic), TOPIC_BASE "/%s/pair_result", device);
     snprintf(payload, sizeof(payload),
              "{\"result\":\"%s\",\"frames_sent\":%u,\"duration_ms\":60000}",
-             ok ? "success" : "timeout", frames);
+             ok ? "success" : "timeout", (unsigned)frames);
     return esp_mqtt_client_publish(s_mqtt, topic, payload, 0, 1, 0);
 }
 

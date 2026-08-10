@@ -20,7 +20,8 @@ int pfx_state_init(pfx_tx_state_t *st) {
         err = nvs_get_blob(h, "state", st, &sz);
         nvs_close(h);
         if (err == ESP_OK && sz == sizeof(*st)) {
-            ESP_LOGI(TAG, "Loaded state: serial=0x%08X counter=%u", st->serial, st->counter);
+            ESP_LOGI(TAG, "Loaded state: serial=0x%08X counter=%u",
+                     (unsigned)st->serial, (unsigned)st->counter);
             return 0;
         }
     }
@@ -105,7 +106,8 @@ int pfx_frame_decrypt(pfx_rx_frame_t *frm, uint64_t crypt_key) {
 void pfx_emit_burst(pfx_tx_state_t *st, uint8_t button, uint32_t n_frames, uint32_t duration_ms) {
     uint32_t delay_per_frame = duration_ms / (n_frames > 0 ? n_frames : 1);
     uint8_t frame[9];
-    ESP_LOGI(TAG, "Burst start: %u frames over %u ms", n_frames, duration_ms);
+    ESP_LOGI(TAG, "Burst start: %u frames over %u ms",
+             (unsigned)n_frames, (unsigned)duration_ms);
     for (uint32_t i = 0; i < n_frames; i++) {
         pfx_frame_build(st, button, frame);
         cc1101_tx_ook_frame(frame, 66);
@@ -114,7 +116,7 @@ void pfx_emit_burst(pfx_tx_state_t *st, uint8_t button, uint32_t n_frames, uint3
         vTaskDelay(pdMS_TO_TICKS(delay_per_frame));
     }
     pfx_state_save(st);
-    ESP_LOGI(TAG, "Burst done. Counter now = %u", st->counter);
+    ESP_LOGI(TAG, "Burst done. Counter now = %u", (unsigned)st->counter);
 }
 
 void pfx_emit_command(pfx_tx_state_t *st, uint8_t button) {
