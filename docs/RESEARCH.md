@@ -31,6 +31,8 @@ Table hardcoded de 183 channels supportés à vaddr `0x0044b8f0` + switch de 50 
 
 **PFX (=Profalux, channel_id 25455) est marqué clone=3 (=FULL)**. Contraste avec KLQ868 générique = clone=2 (=temporary only).
 
+> **⚠️ RETRACTATION 2026-08-06** : le doc [`DEVMEL-YAML-EVIDENCE.md`](DEVMEL-YAML-EVIDENCE.md) créé pour tracer cette découverte a été **retracté**. Vérification par exécution directe du SDK : `isCloneable` est un booléen strict, `isCloneable(PFX 25455) = 0` (=NON cloneable), `isCloneable(KLQ868) = 1`, `getCounterMode(KLQ868) = 3`. La prétendue affirmation "PFX = clone=3 FULL" venait d'une **confusion entre deux enums** (`clone` et `counter`) partageant la valeur 3, propagée sans vérif. La thèse Chamberlain Self-Learn reste ouverte mais n'a plus cette preuve. Voir le doc retracté pour le post-mortem complet.
+
 ### 2. Implication technique cruciale
 
 Si Profalux utilisait un décodeur HCS500 Microchip standard :
