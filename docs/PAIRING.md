@@ -1,5 +1,28 @@
 # OpenProfalux — Plan test empirique appairage
 
+## Statut du modèle DEVMEL (mise à jour)
+
+DEVMEL crée bien une identité virtuelle PFX, mais cela ne prouve pas à lui seul
+un apprentissage Chamberlain. Le runtime observé sélectionne une identité parmi
+63 slots (`serial = (slot << 12) | 0x067`) et une clé KeeLoq correspondante.
+La trame `PAIRMODE` validée pour le slot 54 est `serial=0x36067`,
+`counter=2`, `hop=0xF029775B`, qui se déchiffre en `0x00670002` avec la clé
+du slot. Aucune clé 64 bits ni seed distincte n'a été observée sur l'air.
+
+Le retest doit donc distinguer trois hypothèses :
+
+1. **Identité préprovisionnée / dérivation commune** : seule la clé DEVMEL
+   associée au serial fonctionne.
+2. **Self-learn propriétaire de type Chamberlain** : une clé arbitraire avec
+   le même serial fonctionne également.
+3. **Séquence manquante** : aucune des deux ne fonctionne car un échange ou une
+   étape propriétaire supplémentaire est nécessaire.
+
+Le firmware doit être vérifié avant émission : table 63 slots, index `>>12`,
+codeword HCS300 LSB-first, discrimination 10 bits, TE≈450 µs et préambule
+≈23 éléments. Un simple aller-retour logiciel KeeLoq ne constitue pas une
+preuve d'appairage moteur.
+
 Ce document décrit la procédure de test empirique révisée après la [contre-analyse « 10e homme »](CONTRE-ANALYSE.md) qui a affaibli l'hypothèse initiale d'un simple "émets crypt_key random et le moteur enregistre".
 
 ## Rappel de la faiblesse identifiée
