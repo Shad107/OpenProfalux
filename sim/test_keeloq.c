@@ -78,24 +78,31 @@ int main(void) {
     uint32_t dvm = keeloq_decrypt(0x12345678u, 0xabcdef0123456789ULL);
     check_u32("decrypt(0x12345678, 0xabcdef..) == DEVMEL", dvm, 0x7CC862BEu);
 
-    /* Test 6: selection cle PFX par serial (table obfusquee 0x971010) +
-     * roundtrip sur les 15 cles deobfusquees. */
-    printf("\n[Selection cle PFX + roundtrip 15 cles]\n");
+    /* Test 6: sélection PFX par slot DEVMEL (table 0x970D08),
+     * plus oracle PAIRMODE slot 54. */
+    printf("\n[Selection cle PFX + roundtrip 63 cles]\n");
     uint64_t k0 = 0; uint8_t i0 = 0xFF;
-    bool ok0 = pfx_key_for_serial(0x0467u, &k0, &i0);   /* index 0 */
-    check_u32("pfx serial 0x0467 -> index", (ok0 ? i0 : 0xFF), 0);
-    check_u64("pfx serial 0x0467 -> crypt_key", k0, 0x9265e3d993576bc7ULL);
+    bool ok0 = pfx_key_for_serial(0x1067u, &k0, &i0);   /* slot 1, index 0 */
+    check_u32("pfx serial 0x1067 -> index", (ok0 ? i0 : 0xFF), 0);
+    check_u64("pfx serial 0x1067 -> crypt_key", k0, 0x8F96866FBFD866B1ULL);
     /* serial non-PFX (mauvais marqueur) doit etre rejete */
     check_u32("pfx serial 0x0400 rejete (pas 0x067)",
               pfx_key_for_serial(0x0400u, &k0, &i0) ? 1 : 0, 0);
     int rt_ok = 1;
-    for (uint32_t idx = 0; idx < 15; idx++) {
-        uint32_t serial = ((idx + 1) << 10) | PFX_FAMILY_MARKER;
+    for (uint32_t idx = 0; idx < PFX_KEY_COUNT; idx++) {
+        uint32_t serial = ((idx + 1) << 12) | PFX_FAMILY_MARKER;
         uint64_t k; if (!pfx_key_for_serial(serial, &k, NULL)) { rt_ok = 0; break; }
         uint32_t P = 0x0abc0007u ^ (idx << 20);
         if (keeloq_decrypt(keeloq_encrypt(P, k), k) != P) { rt_ok = 0; break; }
     }
-    check_u32("roundtrip encrypt/decrypt sur 15 cles PFX", rt_ok, 1);
+    check_u32("roundtrip encrypt/decrypt sur 63 cles PFX", rt_ok, 1);
+
+    uint64_t k54 = 0; uint8_t i54 = 0xFF;
+    bool ok54 = pfx_key_for_serial(0x36067u, &k54, &i54);
+    check_u32("oracle slot 54 -> index", ok54 ? i54 : 0xFF, 53);
+    check_u64("oracle slot 54 -> key", k54, 0x41AA649E6ED6E5A7ULL);
+    check_u32("oracle PAIRMODE hop decrypt",
+              keeloq_decrypt(0xF029775Bu, k54), 0x00670002u);
 
     printf("\n=== Results: %d passed, %d failed ===\n", passed, failed);
     return failed == 0 ? 0 : 1;

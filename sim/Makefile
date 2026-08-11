@@ -18,7 +18,7 @@ all: sim_openprofalux test_keeloq
 sim_openprofalux: sim_main.o mock_cc1101.o mock_nvs.o ../firmware/main/keeloq.o ../firmware/main/profalux_sim.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-test_keeloq: test_keeloq.o ../firmware/main/keeloq.o
+test_keeloq: test_keeloq.o ../firmware/main/keeloq.o ../firmware/main/pfx_keys.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 %.o: %.c
