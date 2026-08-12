@@ -1,6 +1,15 @@
 #include "profalux.h"
 #include "keeloq.h"
 #include "cc1101.h"
+#include "pfx_keys.h"
+
+/* --- Identite de test Phase 2 (reference DEVMEL) ---
+ * Si PFX_USE_TEST_IDENTITY=1, pfx_state_reset() emet le serial DEVMEL du pool valide
+ * (clef derivee via pfx_key_for_serial) au lieu d'un emetteur random.
+ * serial 0x36067 = slot 54 (index 53) -> clef 0x41AA649E6ED6E5A7 (oracle valide).
+ * Mettre a 0 pour revenir au self-learn random. */
+#define PFX_USE_TEST_IDENTITY 1
+#define PFX_TEST_SERIAL       0x00036067u
 #include <string.h>
 #include <esp_random.h>
 #include <nvs.h>
@@ -39,6 +48,21 @@ int pfx_state_save(const pfx_tx_state_t *st) {
 }
 
 int pfx_state_reset(pfx_tx_state_t *st) {
+#if PFX_USE_TEST_IDENTITY
+    /* Identite DEVMEL du pool valide (test Phase 2). Clef derivee du serial. */
+    uint64_t k; uint8_t idx;
+    if (pfx_key_for_serial(PFX_TEST_SERIAL, &k, &idx)) {
+        st->serial = PFX_TEST_SERIAL;
+        st->crypt_key = k;
+        st->counter = 0;
+        st->discrimination = st->serial & 0xFFF;   /* = 0x067 (famille PFX) */
+        ESP_LOGI(TAG, "Identite DEVMEL de test: serial=0x%08X idx=%u key=0x%016llX",
+                 (unsigned)st->serial, idx, (unsigned long long)st->crypt_key);
+        return pfx_state_save(st);
+    }
+    ESP_LOGW(TAG, "PFX_TEST_SERIAL 0x%08X invalide (pas famille 0x067 ?), fallback random",
+             (unsigned)PFX_TEST_SERIAL);
+#endif
     st->serial = esp_random() & 0x0FFFFFFF;
     st->crypt_key = ((uint64_t)esp_random() << 32) | esp_random();
     st->counter = 0;
@@ -82,8 +106,12 @@ int pfx_frame_parse(const uint8_t frame[9], pfx_rx_frame_t *out) {
     if (!frame || !out) return -1;
     uint32_t enc = ((uint32_t)frame[0] << 24) | ((uint32_t)frame[1] << 16)
                  | ((uint32_t)frame[2] <<  8) | ((uint32_t)frame[3]);
-    uint32_t serial = ((uint32_t)frame[4] << 20) | ((uint32_t)frame[5] << 12)
-                    | ((uint32_t)frame[6] <<  4) | ((uint32_t)(frame[7] >> 4) & 0x0F);
+    /* Serial LSB-first sur l'air (=meme convention que pfx_frame_build) : on lit le
+     * champ empaquete (sr) puis on inverse les 28 bits pour retrouver le serial reel. */
+    uint32_t sr = ((uint32_t)frame[4] << 20) | ((uint32_t)frame[5] << 12)
+                | ((uint32_t)frame[6] <<  4) | ((uint32_t)(frame[7] >> 4) & 0x0F);
+    uint32_t serial = 0;
+    for (int k = 0; k < 28; k++) serial |= ((sr >> k) & 1u) << (27 - k);
     uint8_t button = frame[7] & 0x0F;
     uint8_t status = frame[8] & 0x03;
 
