@@ -43,6 +43,11 @@ int  pfx_frame_decrypt(pfx_rx_frame_t *frm, uint64_t crypt_key);
 /* Emit N frames spaced over duration_ms (=for pairing burst) */
 void pfx_emit_burst(pfx_tx_state_t *st, uint8_t button, uint32_t n_frames, uint32_t duration_ms);
 
+/* Tient un bouton "appuye" (meme compteur/hop) pendant duration_ms, comme un
+ * vrai appui maintenu. Incremente et sauvegarde le compteur UNE fois a la fin.
+ * Utilise pour l'etape 2 de la notice (STOP-en-P maintenu 5 s = bouton 0x8). */
+void pfx_emit_hold(pfx_tx_state_t *st, uint8_t button, uint32_t duration_ms);
+
 /* Emit single command (=3 repeats HCS301-style) */
 void pfx_emit_command(pfx_tx_state_t *st, uint8_t button);
 

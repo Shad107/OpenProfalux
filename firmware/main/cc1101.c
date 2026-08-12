@@ -48,6 +48,11 @@ static volatile bool      s_rx_running = false;
 #define CC_TEST0    0x2E
 #define CC_PARTNUM  0x30
 #define CC_RSSI     0x34
+#define CC_MARCSTATE 0x35   /* etat machine radio (0x0D=RX, 0x13=TX, 0x01=IDLE) */
+#define CC_MCSM1    0x17
+#define CC_FREND1   0x21
+#define CC_FREND0   0x22    /* PA_POWER : bit0..2 = index PATABLE utilise */
+#define CC_PATABLE  0x3E
 
 /* Strobes */
 #define CC_SRES     0x30
@@ -64,16 +69,19 @@ static const struct { uint8_t reg, val; } s_regs[] = {
     {CC_FIFOTHR,  0x47},
     {CC_PKTLEN,   0xFF},
     {CC_PKTCTRL0, 0x32},  /* Async serial, no CRC, infinite packet */
-    {CC_FREQ2,    0x21},  /* 868.35 MHz */
-    {CC_FREQ1,    0x65},
-    {CC_FREQ0,    0x6A},
-    {CC_MDMCFG4,  0xF6},  /* Data rate ~1550 baud */
+    {CC_FREQ2,    0x21},  /* 868.425 MHz (mesure 2026-08-10, etait 868.35 = hors bande) */
+    {CC_FREQ1,    0x66},
+    {CC_FREQ0,    0xA5},
+    {CC_MDMCFG4,  0xC6},  /* RX BW 102 kHz (mesure) */
     {CC_MDMCFG3,  0x83},
     {CC_MDMCFG2,  0x30},  /* OOK/ASK modulation, no preamble/sync */
     {CC_MDMCFG1,  0x22},
     {CC_MDMCFG0,  0xF8},
     {CC_DEVIATN,  0x15},
-    {CC_MCSM0,    0x18},
+    {CC_MCSM1,    0x3C},   /* reste en RX apres reception (comme le sniffer) */
+    {CC_MCSM0,    0x18},   /* FS_AUTOCAL: calibre le PLL a IDLE->TX/RX */
+    {CC_FREND1,   0xB6},   /* front analogique (ref sniffer qui capte) */
+    {CC_FREND0,   0x11},   /* PA_POWER=1 => OOK utilise PATABLE[0] et [1] */
     {CC_FOCCFG,   0x14},
     {CC_WORCTRL,  0xFB},
     {CC_FSCAL3,   0xE9},
@@ -140,36 +148,72 @@ int cc1101_init(void) {
     for (size_t i = 0; i < sizeof(s_regs) / sizeof(s_regs[0]); i++) {
         cc1101_write_reg(s_regs[i].reg, s_regs[i].val);
     }
+    /* PATABLE (burst) pour OOK : index0=eteint (bit 0), index1=puissance (bit 1). */
+    {
+        uint8_t tx[3] = { CC_PATABLE | 0x40, 0x00, 0xC0 }, rx[3];
+        cs_low(); spi_xfer(tx, rx, 3); cs_high();
+    }
     uint8_t partnum = cc1101_read_reg(CC_PARTNUM | 0x40);
-    ESP_LOGI(TAG, "PARTNUM=0x%02X (=expected 0x00 for CC1101)", partnum);
+    uint8_t marc    = cc1101_read_reg(CC_MARCSTATE | 0x40) & 0x1F;
+    ESP_LOGI(TAG, "PARTNUM=0x%02X (=expected 0x00) MARCSTATE=0x%02X (0x01=IDLE)", partnum, marc);
     return (partnum == 0x00) ? 0 : -1;
 }
 
-/* Synchronous bit-bang OOK on GDO0.
- * KEELOQ PWM encoding : bit_time ~650us, "0"=short pulse then long space, "1"=long pulse then short space.
- * Preamble : 12 pulses + header 4ms + 66 data bits + inter-frame gap.
- */
+/* Synchronous bit-bang OOK on GDO0. Codage PWM HCS30x mesure le 2026-08-10 :
+ *   Te=455us, periode de bit = 3*Te = 1365us.
+ *   symbole H455 L910 (H<L)  et  symbole H910 L455 (H>L).
+ * POLARITE (quel symbole = logique 1) NON etablie avec une seule telecommande :
+ * on applique la convention "bit=1 si H<L" du decode, A CONFIRMER empiriquement
+ * (si l'appairage echoue, inverser PFX_TX_INVERT). */
+#ifndef PFX_TX_INVERT
+#define PFX_TX_INVERT 0
+#endif
 static void ook_bit(bool one) {
-    /* PWM style: "1" = high 250us + low 400us. "0" = high 500us + low 150us. */
-    if (one) {
-        gpio_set_level(CC1101_PIN_GDO0, 1); esp_rom_delay_us(250);
-        gpio_set_level(CC1101_PIN_GDO0, 0); esp_rom_delay_us(400);
-    } else {
-        gpio_set_level(CC1101_PIN_GDO0, 1); esp_rom_delay_us(500);
-        gpio_set_level(CC1101_PIN_GDO0, 0); esp_rom_delay_us(150);
+    if (PFX_TX_INVERT) one = !one;
+    if (one) {  /* symbole H455 L910 */
+        gpio_set_level(CC1101_PIN_GDO0, 1); esp_rom_delay_us(455);
+        gpio_set_level(CC1101_PIN_GDO0, 0); esp_rom_delay_us(910);
+    } else {    /* symbole H910 L455 */
+        gpio_set_level(CC1101_PIN_GDO0, 1); esp_rom_delay_us(910);
+        gpio_set_level(CC1101_PIN_GDO0, 0); esp_rom_delay_us(455);
     }
+}
+
+/* Auto-test d'emission : passe en TX, lit MARCSTATE (0x13 = porteuse ON),
+ * module ~300 ms puis revient a IDLE. Prouve que la puce emet, sans recepteur. */
+int cc1101_tx_selftest(void) {
+    strobe(CC_STX);
+    esp_rom_delay_us(1000);
+    uint8_t m1 = cc1101_read_reg(CC_MARCSTATE | 0x40) & 0x1F;
+    for (int i = 0; i < 300; i++) {   /* porteuse modulee 1kHz pendant ~300ms */
+        gpio_set_level(CC1101_PIN_GDO0, 1); esp_rom_delay_us(500);
+        gpio_set_level(CC1101_PIN_GDO0, 0); esp_rom_delay_us(500);
+    }
+    uint8_t m2 = cc1101_read_reg(CC_MARCSTATE | 0x40) & 0x1F;
+    strobe(CC_SIDLE);
+    ESP_LOGI(TAG, "TX SELFTEST: MARCSTATE post-STX=0x%02X, pendant modulation=0x%02X "
+                  "(0x13=TX porteuse ON, 0x01=IDLE=rien)", m1, m2);
+    return (m1 == 0x13 || m2 == 0x13) ? 0 : -1;
 }
 
 int cc1101_tx_ook_frame(const uint8_t *frame, size_t bits) {
     strobe(CC_STX);
-    esp_rom_delay_us(500);
+    esp_rom_delay_us(800);   /* laisse le PLL se caler (FS_AUTOCAL) avant de moduler */
 
-    /* Preamble: 12 short pulses ~400us */
-    for (int i = 0; i < PROFALUX_PREAMBLE_PULSES; i++) {
-        gpio_set_level(CC1101_PIN_GDO0, 1); esp_rom_delay_us(PROFALUX_PREAMBLE_US);
-        gpio_set_level(CC1101_PIN_GDO0, 0); esp_rom_delay_us(PROFALUX_PREAMBLE_US);
+    /* Preuve d'emission : lit MARCSTATE une fois par boot. 0x13=TX (porteuse ON). */
+    static bool s_marc_logged = false;
+    if (!s_marc_logged) {
+        s_marc_logged = true;
+        uint8_t m = cc1101_read_reg(CC_MARCSTATE | 0x40) & 0x1F;
+        ESP_LOGI(TAG, "TX MARCSTATE=0x%02X (0x13=TX porteuse ON, 0x01=IDLE=rien emis)", m);
     }
-    /* Header: 4ms low */
+
+    /* Preambule: 23 alternances de Te (mesure) */
+    for (int i = 0; i < PROFALUX_PREAMBLE_ELEMENTS; i++) {
+        gpio_set_level(CC1101_PIN_GDO0, (i & 1) == 0);  /* H,L,H,L... */
+        esp_rom_delay_us(PROFALUX_TE_US);
+    }
+    /* Header: silence ~4450us low */
     gpio_set_level(CC1101_PIN_GDO0, 0); esp_rom_delay_us(PROFALUX_HEADER_US);
 
     /* Data bits MSB first */

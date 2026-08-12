@@ -24,6 +24,9 @@ int  cc1101_tx_ook_frame(const uint8_t *frame, size_t bits);
 int  cc1101_rx_start(cc1101_rx_cb_t cb);
 int  cc1101_rx_stop(void);
 
+/* Auto-test emission : renvoie 0 si la puce passe bien en TX (MARCSTATE 0x13). */
+int  cc1101_tx_selftest(void);
+
 /* Utils */
 int8_t cc1101_get_rssi(void);
 uint8_t cc1101_read_reg(uint8_t addr);
