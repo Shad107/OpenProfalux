@@ -63,11 +63,16 @@ void pfx_frame_build(const pfx_tx_state_t *st, uint8_t button, uint8_t frame[9])
     frame[1] = (enc >> 16) & 0xFF;
     frame[2] = (enc >>  8) & 0xFF;
     frame[3] = (enc >>  0) & 0xFF;
-    /* Bits 32-5: serial 28-bit */
-    frame[4] = (st->serial >> 20) & 0xFF;
-    frame[5] = (st->serial >> 12) & 0xFF;
-    frame[6] = (st->serial >>  4) & 0xFF;
-    frame[7] = ((st->serial & 0xF) << 4) | (button & 0xF);
+    /* Serial 28-bit serialise LSB-first (=comme les vraies trames HCS300/PFX 0x813,
+     * verifie 25/25 contre captures reelles). On inverse les 28 bits du serial, puis
+     * on empaquette MSB-first par octet (l'emission cc1101 est MSB-first) => le serial
+     * ressort LSB-first sur l'air. crypt_key / counter / KeeLoq inchanges. */
+    uint32_t sr = 0;
+    for (int k = 0; k < 28; k++) sr |= ((st->serial >> k) & 1u) << (27 - k);
+    frame[4] = (sr >> 20) & 0xFF;
+    frame[5] = (sr >> 12) & 0xFF;
+    frame[6] = (sr >>  4) & 0xFF;
+    frame[7] = ((sr & 0xF) << 4) | (button & 0xF);
     /* Bits 4-3: button (already in frame[7]) */
     /* Bits 2-1: status flags = 0 (repeat=0, batt_low=0) */
     frame[8] = 0;
