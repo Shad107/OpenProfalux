@@ -80,11 +80,13 @@
  * KEELOQ / Profalux constants (=target-independent)
  * ═══════════════════════════════════════════════════════════════ */
 
-#define PROFALUX_FREQ_HZ          868350000UL
-#define PROFALUX_BIT_TIME_US            650
-#define PROFALUX_PREAMBLE_PULSES         12
-#define PROFALUX_PREAMBLE_US            400
-#define PROFALUX_HEADER_US             4000
+/* Valeurs MESUREES sur l'air le 2026-08-10 (captures/2026-08-10-profalux-868). */
+#define PROFALUX_FREQ_HZ          868425000UL  /* 868,425 MHz (etait 868,350 = hors bande) */
+#define PROFALUX_TE_US                  455    /* element de base T_E mesure */
+#define PROFALUX_BIT_TIME_US           1365    /* periode de bit = 3*Te */
+#define PROFALUX_PREAMBLE_ELEMENTS       23    /* 23 alternances de Te */
+#define PROFALUX_PREAMBLE_US            455    /* = Te */
+#define PROFALUX_HEADER_US             4450    /* silence mesure 4420-4491 us */
 #define PROFALUX_REPEAT_COUNT            10  /* HCS301 typical */
 
 /* Boutons Profalux (=confirmés captures beedec65) */

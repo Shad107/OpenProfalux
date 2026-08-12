@@ -22,17 +22,33 @@ static const char *TAG = "profalux";
 static const char *NVS_NAMESPACE = "pfx_state";
 
 int pfx_state_init(pfx_tx_state_t *st) {
+    bool loaded = false;
     nvs_handle_t h;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &h);
-    if (err == ESP_OK) {
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) == ESP_OK) {
         size_t sz = sizeof(*st);
-        err = nvs_get_blob(h, "state", st, &sz);
+        if (nvs_get_blob(h, "state", st, &sz) == ESP_OK && sz == sizeof(*st)) loaded = true;
         nvs_close(h);
-        if (err == ESP_OK && sz == sizeof(*st)) {
-            ESP_LOGI(TAG, "Loaded state: serial=0x%08X counter=%u",
-                     (unsigned)st->serial, (unsigned)st->counter);
-            return 0;
-        }
+    }
+#if PFX_USE_TEST_IDENTITY
+    /* Force l'identite DEVMEL slot 54 (serial + cle deterministes), mais garde le
+     * counter depuis NVS pour qu'il AVANCE (anti-replay). Premier init : counter=2
+     * (= PAIRMODE DEVMEL, oracle 0xF029775B). A retirer apres appairage reussi. */
+    uint64_t k; uint8_t idx;
+    if (pfx_key_for_serial(PFX_TEST_SERIAL, &k, &idx)) {
+        st->serial = PFX_TEST_SERIAL;
+        st->crypt_key = k;
+        st->discrimination = PFX_TEST_SERIAL & 0xFFF;   /* 0x067 */
+        if (!loaded) st->counter = 2;
+        ESP_LOGI(TAG, "Identite DEVMEL slot 54: serial=0x%08X idx=%u counter=%u (avance/anti-replay)",
+                 (unsigned)st->serial, idx, (unsigned)st->counter);
+        return pfx_state_save(st);
+    }
+    ESP_LOGW(TAG, "PFX_TEST_SERIAL 0x%08X invalide, fallback", (unsigned)PFX_TEST_SERIAL);
+#endif
+    if (loaded) {
+        ESP_LOGI(TAG, "Loaded state: serial=0x%08X counter=%u",
+                 (unsigned)st->serial, (unsigned)st->counter);
+        return 0;
     }
     ESP_LOGI(TAG, "No state in NVS, generating new random");
     return pfx_state_reset(st);
@@ -54,7 +70,7 @@ int pfx_state_reset(pfx_tx_state_t *st) {
     if (pfx_key_for_serial(PFX_TEST_SERIAL, &k, &idx)) {
         st->serial = PFX_TEST_SERIAL;
         st->crypt_key = k;
-        st->counter = 0;
+        st->counter = 2;                            /* = counter DEVMEL PAIRMODE valide (oracle 0xF029775B) */
         st->discrimination = st->serial & 0xFFF;   /* = 0x067 (famille PFX) */
         ESP_LOGI(TAG, "Identite DEVMEL de test: serial=0x%08X idx=%u key=0x%016llX",
                  (unsigned)st->serial, idx, (unsigned long long)st->crypt_key);
@@ -77,16 +93,28 @@ void pfx_frame_build(const pfx_tx_state_t *st, uint8_t button, uint8_t frame[9])
                        | st->counter;
     uint32_t enc = keeloq_encrypt(plaintext, st->crypt_key);
 
+    /* Hop chiffre : en HCS30x tout le mot est transmis LSB-first, comme le serial
+     * (dont l'ordre LSB-first est verifie contre la capture reelle). Notre serial
+     * etait deja LSB-first mais le hop etait MSB-first = incoherent. On bit-reverse
+     * le hop pour qu'il sorte LSB-first lui aussi. Flag pour rebasculer si besoin. */
+#ifndef PFX_HOP_LSB_FIRST
+#define PFX_HOP_LSB_FIRST 1
+#endif
+#if PFX_HOP_LSB_FIRST
+    uint32_t enc_tx = 0;
+    for (int k = 0; k < 32; k++) enc_tx |= ((enc >> k) & 1u) << (31 - k);
+#else
+    uint32_t enc_tx = enc;
+#endif
+
     /* Frame 66-bit layout (bit stream) :
-     * [status:2][button:4][serial:28][encrypted:32]
-     * Serialize MSB first for OOK/PWM transmission
-     */
+     * [encrypted:32][serial:28][button:4][status:2]
+     * empaquete MSB-first par octet (le cc1101 emet MSB-first) */
     memset(frame, 0, 9);
-    /* Bits 64-33: encrypted (=high bits transmitted first) */
-    frame[0] = (enc >> 24) & 0xFF;
-    frame[1] = (enc >> 16) & 0xFF;
-    frame[2] = (enc >>  8) & 0xFF;
-    frame[3] = (enc >>  0) & 0xFF;
+    frame[0] = (enc_tx >> 24) & 0xFF;
+    frame[1] = (enc_tx >> 16) & 0xFF;
+    frame[2] = (enc_tx >>  8) & 0xFF;
+    frame[3] = (enc_tx >>  0) & 0xFF;
     /* Serial 28-bit serialise LSB-first (=comme les vraies trames HCS300/PFX 0x813,
      * verifie 25/25 contre captures reelles). On inverse les 28 bits du serial, puis
      * on empaquette MSB-first par octet (l'emission cc1101 est MSB-first) => le serial
@@ -150,6 +178,26 @@ void pfx_emit_burst(pfx_tx_state_t *st, uint8_t button, uint32_t n_frames, uint3
     }
     pfx_state_save(st);
     ESP_LOGI(TAG, "Burst done. Counter now = %u", (unsigned)st->counter);
+}
+
+void pfx_emit_hold(pfx_tx_state_t *st, uint8_t button, uint32_t duration_ms) {
+    uint8_t frame[9];
+    /* Compteur INCREMENTE a chaque trame (vrai code tournant) : sinon on rejoue
+     * la meme trame et le moteur la rejette comme un rejeu. Depart au counter
+     * courant (= 2 au premier appairage), donc 1re trame = PAIRMODE 0xF029775B. */
+    ESP_LOGI(TAG, "EMIT bouton 0x%X depuis counter=%u pendant %u ms (compteur incremente)",
+             button, (unsigned)st->counter, (unsigned)duration_ms);
+    uint32_t elapsed = 0, n = 0;
+    while (elapsed < duration_ms) {
+        pfx_frame_build(st, button, frame);   /* trame avec le counter courant */
+        cc1101_tx_ook_frame(frame, 66);
+        st->counter++;                        /* increment chaque trame */
+        if ((n & 0x0F) == 0) pfx_state_save(st);
+        vTaskDelay(pdMS_TO_TICKS(60));
+        elapsed += 165; n++;
+    }
+    pfx_state_save(st);
+    ESP_LOGI(TAG, "EMIT termine: %u trames, counter->%u", (unsigned)n, (unsigned)st->counter);
 }
 
 void pfx_emit_command(pfx_tx_state_t *st, uint8_t button) {
