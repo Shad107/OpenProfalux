@@ -62,6 +62,42 @@ static void publish_state(const char *last_cmd) {
     ESP_LOGI(TAG, "State published: counter=%u last=%s", (unsigned)g_state.counter, last_cmd);
 }
 
+/* ────── Persistance NVS des trames captees (analyse ulterieure si test KO) ────── */
+/* Sauvegarde chaque trame captee en flash (survit reboot / perte du log UART).
+ * Namespace "caps" : "n" = compteur, "cK" = "rssi=.. gap=.. <bits bruts>". */
+static void save_frame_nvs(const char *raw, int rssi, uint32_t gap) {
+    nvs_handle_t h;
+    if (nvs_open("caps", NVS_READWRITE, &h) != ESP_OK) return;
+    uint16_t n = 0; nvs_get_u16(h, "n", &n);
+    if (n < 64) {
+        char key[8];  snprintf(key, sizeof(key), "c%u", (unsigned)n);
+        char val[96]; snprintf(val, sizeof(val), "rssi=%d gap=%u %s", rssi, (unsigned)gap, raw);
+        if (nvs_set_str(h, key, val) == ESP_OK && nvs_set_u16(h, "n", n + 1) == ESP_OK)
+            nvs_commit(h);
+    }
+    nvs_close(h);
+}
+/* Redump toutes les trames sauvegardees (appele au boot). */
+static void dump_frames_nvs(void) {
+    nvs_handle_t h;
+    if (nvs_open("caps", NVS_READONLY, &h) != ESP_OK) return;
+    uint16_t n = 0; nvs_get_u16(h, "n", &n);
+    if (n) ESP_LOGI("caps", "=== %u trame(s) sauvegardee(s) en NVS (analyse) ===", (unsigned)n);
+    for (uint16_t i = 0; i < n; i++) {
+        char key[8]; snprintf(key, sizeof(key), "c%u", (unsigned)i);
+        char val[96]; size_t sz = sizeof(val);
+        if (nvs_get_str(h, key, val, &sz) == ESP_OK) ESP_LOGI("caps", "  NVS[%u] %s", (unsigned)i, val);
+    }
+    nvs_close(h);
+}
+/* Efface le journal NVS des trames (nouvelle campagne de test). */
+static void clear_frames_nvs(void) {
+    nvs_handle_t h;
+    if (nvs_open("caps", NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_erase_all(h); nvs_commit(h); nvs_close(h);
+    ESP_LOGW("caps", "journal NVS des trames EFFACE.");
+}
+
 /* ────── MQTT handlers ────── */
 
 static void on_pair(const char *device) {
@@ -138,6 +174,9 @@ void app_main(void) {
     ESP_LOGI(TAG, "device=%s wifi_ssid=%s mqtt=%s",
              s_device_name, s_wifi_ssid, s_mqtt_uri);
 
+    /* 2b. Redump des trames captees sauvegardees (analyse) */
+    dump_frames_nvs();
+
     /* 3. Profalux state */
     pfx_state_init(&g_state);
 
@@ -193,15 +232,15 @@ void app_main(void) {
      *   - appui court        = PILOTAGE, cycle MONTEE -> STOP -> DESCENTE
      * Une seule image pour enroler puis piloter sans reflasher. */
     /* ===== MODE 2-TESTS (RollJam + preuve d'emission OpenProfalux) =====
-     * Bouton ATOM G39, 3 durees d'appui :
-     *   - COURT (<1,2s)  = CAPTURE une trame -> l'ajoute au tableau (dump RAW + timing)
-     *   - MOYEN (1,2-3s) = TEST 1 : rejeu BRUT de la sequence avec le timing capte
-     *                      (magnetophone : prouve RF + acceptation moteur)
-     *   - LONG  (>3s)    = TEST 2 : rejoue la DERNIERE trame via NOTRE pipeline
-     *                      (pfx_frame_build_with_hop, vrai hop reversé) = preuve que
-     *                      OpenProfalux emet correctement (byte-identique aux vraies
-     *                      trames, valide 7/7 offline).
-     * Le 1er appui COURT apres un rejeu repart d'une sequence vierge.
+     * Bouton ATOM G39, comptage d'appuis RAPIDES (fenetre 450 ms entre appuis) :
+     *   - 1 appui       = CAPTURE une trame -> tableau (dump RAW + timing)
+     *   - 2 appuis      = TEST 1 : rejeu BRUT de la sequence (magnetophone : RF + accept moteur)
+     *   - 3 appuis      = TEST 2 : derniere trame via NOTRE pipeline
+     *                     (pfx_frame_build_with_hop, vrai hop reversé) = preuve que
+     *                     OpenProfalux emet correctement (byte-identique 7/7 offline).
+     *   - 4 appuis ou + = efface le journal NVS des trames (nouvelle campagne).
+     * Chaque capture est aussi persistee en NVS (analyse ulterieure, redump au boot).
+     * Le 1er appui (capture) apres un rejeu repart d'une sequence vierge.
      * Rappel : le rejeu ne marche que si le moteur n'a PAS entendu la trame (rolling). */
     #define CAP_MAX 8
     static char capbuf[CAP_MAX][80];
@@ -211,12 +250,22 @@ void app_main(void) {
     int prev = 1; uint32_t hb = 0;
     while (1) {
         int now = gpio_get_level(39);
-        if (prev == 1 && now == 0) {          /* front descendant = debut appui */
-            uint32_t held = 0;
-            while (gpio_get_level(39) == 0) { vTaskDelay(pdMS_TO_TICKS(20)); held += 20; }
+        if (prev == 1 && now == 0) {          /* front descendant = 1er appui */
+            /* compte les appuis RAPIDES : fenetre 450 ms entre relachement et suivant */
+            int taps = 0;
+            for (;;) {
+                while (gpio_get_level(39) == 0) vTaskDelay(pdMS_TO_TICKS(15));  /* attend relachement */
+                taps++;
+                int waited = 0, again = 0;
+                while (waited < 450) {
+                    vTaskDelay(pdMS_TO_TICKS(15)); waited += 15;
+                    if (gpio_get_level(39) == 0) { again = 1; break; }
+                }
+                if (!again) break;
+            }
 
-            if (held < 1200) {
-                /* ---- COURT : CAPTURE + append au tableau ---- */
+            if (taps == 1) {
+                /* ---- 1 APPUI : CAPTURE + append au tableau ---- */
                 if (session_done) { count = 0; session_done = 0; t_prev = 0; }  /* nouvelle sequence */
                 if (count >= CAP_MAX) { ESP_LOGW(TAG, "tableau plein (%d) : on repart de 0", CAP_MAX); count = 0; t_prev = 0; }
                 ESP_LOGI(TAG, ">>> CAPTURE #%d : presse ta 0x813 dans les 6 s... <<<", count);
@@ -232,14 +281,15 @@ void app_main(void) {
                     ESP_LOGI(TAG, "  #%d serial=0x%05X btn=0x%X hop=0x%08X gap=%ums nbits=%d",
                              count, (unsigned)serial, btn, (unsigned)hop_msb, (unsigned)gap, n);
                     ESP_LOGI(TAG, "  RAW=%s", capbuf[count]);   /* dump brut : a sauvegarder/verifier */
+                    save_frame_nvs(capbuf[count], cc1101_get_rssi(), gap);  /* persistance flash */
                     count++;
                 } else {
                     ESP_LOGW(TAG, "  rien capte (nb=%d). Rapproche la telecommande du module.", n);
                 }
 
-            } else if (held < 3000) {
-                /* ---- MOYEN : TEST 1 = rejeu BRUT de la sequence + timing ---- */
-                if (count == 0) { ESP_LOGW(TAG, ">>> TEST 1 : rien a rejouer (capture d'abord, appui court) <<<"); }
+            } else if (taps == 2) {
+                /* ---- 2 APPUIS : TEST 1 = rejeu BRUT de la sequence + timing ---- */
+                if (count == 0) { ESP_LOGW(TAG, ">>> TEST 1 : rien a rejouer (capture d'abord : 1 appui) <<<"); }
                 else {
                     ESP_LOGI(TAG, ">>> TEST 1 : REJEU BRUT de %d trame(s) avec timing <<<", count);
                     for (int i = 0; i < count; i++) {
@@ -251,8 +301,8 @@ void app_main(void) {
                     session_done = 1;
                 }
 
-            } else {
-                /* ---- LONG : TEST 2 = derniere trame VIA OpenProfalux ---- */
+            } else if (taps == 3) {
+                /* ---- 3 APPUIS : TEST 2 = derniere trame VIA OpenProfalux ---- */
                 if (count == 0) { ESP_LOGW(TAG, ">>> TEST 2 : rien a rejouer (capture d'abord) <<<"); }
                 else {
                     int i = count - 1;
@@ -268,6 +318,10 @@ void app_main(void) {
                     ESP_LOGI(TAG, "  TEST 2 fini. Le volet a bouge ? (si oui = OpenProfalux emet correctement)");
                     session_done = 1;
                 }
+
+            } else {
+                /* ---- 4 APPUIS ou + : efface le journal NVS des trames ---- */
+                clear_frames_nvs();
             }
             now = 1;                            /* relache */
         }
