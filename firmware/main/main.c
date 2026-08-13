@@ -192,37 +192,81 @@ void app_main(void) {
      *   - appui LONG (>1,5 s) = ENROLEMENT (burst bouton PROG 0x8)
      *   - appui court        = PILOTAGE, cycle MONTEE -> STOP -> DESCENTE
      * Une seule image pour enroler puis piloter sans reflasher. */
-    /* MODE CAPTURE + REJEU (famille RollJam) :
-     *   - appui court = CAPTURE une vraie trame (RX ~6s), la stocke + logge
-     *   - appui LONG  = REJOUE la trame captee (TX x10)
+    /* ===== MODE 2-TESTS (RollJam + preuve d'emission OpenProfalux) =====
+     * Bouton ATOM G39, 3 durees d'appui :
+     *   - COURT (<1,2s)  = CAPTURE une trame -> l'ajoute au tableau (dump RAW + timing)
+     *   - MOYEN (1,2-3s) = TEST 1 : rejeu BRUT de la sequence avec le timing capte
+     *                      (magnetophone : prouve RF + acceptation moteur)
+     *   - LONG  (>3s)    = TEST 2 : rejoue la DERNIERE trame via NOTRE pipeline
+     *                      (pfx_frame_build_with_hop, vrai hop reversé) = preuve que
+     *                      OpenProfalux emet correctement (byte-identique aux vraies
+     *                      trames, valide 7/7 offline).
+     * Le 1er appui COURT apres un rejeu repart d'une sequence vierge.
      * Rappel : le rejeu ne marche que si le moteur n'a PAS entendu la trame (rolling). */
-    char cap[80]; int cap_n = 0;
+    #define CAP_MAX 8
+    static char capbuf[CAP_MAX][80];
+    static int  capbits[CAP_MAX];
+    static uint32_t capgap[CAP_MAX];      /* ms depuis la trame precedente */
+    int count = 0, session_done = 0; int64_t t_prev = 0;
     int prev = 1; uint32_t hb = 0;
     while (1) {
         int now = gpio_get_level(39);
         if (prev == 1 && now == 0) {          /* front descendant = debut appui */
             uint32_t held = 0;
             while (gpio_get_level(39) == 0) { vTaskDelay(pdMS_TO_TICKS(20)); held += 20; }
-            if (held >= 1500) {
-                if (cap_n >= 64) {
-                    ESP_LOGI(TAG, ">>> Appui LONG : REJEU trame captee (%d bits) x10 <<<", cap_n);
-                    for (int k = 0; k < 10; k++) { cc1101_tx_raw_bits(cap, cap_n); vTaskDelay(pdMS_TO_TICKS(30)); }
-                    ESP_LOGI(TAG, "  rejeu fini. Le volet a bouge ?");
+
+            if (held < 1200) {
+                /* ---- COURT : CAPTURE + append au tableau ---- */
+                if (session_done) { count = 0; session_done = 0; t_prev = 0; }  /* nouvelle sequence */
+                if (count >= CAP_MAX) { ESP_LOGW(TAG, "tableau plein (%d) : on repart de 0", CAP_MAX); count = 0; t_prev = 0; }
+                ESP_LOGI(TAG, ">>> CAPTURE #%d : presse ta 0x813 dans les 6 s... <<<", count);
+                int n = cc1101_rx_listen_bits(6000, capbuf[count], 79);
+                if (n >= 64) {
+                    int64_t tnow = esp_timer_get_time();
+                    uint32_t gap = (t_prev == 0) ? 0 : (uint32_t)((tnow - t_prev) / 1000);
+                    t_prev = tnow;
+                    capbits[count] = n; capgap[count] = gap; capbuf[count][n] = '\0';
+                    uint32_t hop_msb = 0; for (int i = 0; i < 32; i++)  hop_msb = (hop_msb << 1) | (capbuf[count][i]-'0');
+                    uint32_t serial  = 0; for (int i = 59; i >= 32; i--) serial  = (serial  << 1) | (capbuf[count][i]-'0');
+                    int btn = 0;          for (int i = 60; i < 64; i++)  btn     = (btn     << 1) | (capbuf[count][i]-'0');
+                    ESP_LOGI(TAG, "  #%d serial=0x%05X btn=0x%X hop=0x%08X gap=%ums nbits=%d",
+                             count, (unsigned)serial, btn, (unsigned)hop_msb, (unsigned)gap, n);
+                    ESP_LOGI(TAG, "  RAW=%s", capbuf[count]);   /* dump brut : a sauvegarder/verifier */
+                    count++;
                 } else {
-                    ESP_LOGW(TAG, ">>> Appui LONG : rien a rejouer (fais un appui court pour capturer d'abord) <<<");
+                    ESP_LOGW(TAG, "  rien capte (nb=%d). Rapproche la telecommande du module.", n);
                 }
+
+            } else if (held < 3000) {
+                /* ---- MOYEN : TEST 1 = rejeu BRUT de la sequence + timing ---- */
+                if (count == 0) { ESP_LOGW(TAG, ">>> TEST 1 : rien a rejouer (capture d'abord, appui court) <<<"); }
+                else {
+                    ESP_LOGI(TAG, ">>> TEST 1 : REJEU BRUT de %d trame(s) avec timing <<<", count);
+                    for (int i = 0; i < count; i++) {
+                        if (i > 0 && capgap[i] > 0 && capgap[i] < 10000) vTaskDelay(pdMS_TO_TICKS(capgap[i]));
+                        for (int k = 0; k < 3; k++) { cc1101_tx_raw_bits(capbuf[i], capbits[i]); vTaskDelay(pdMS_TO_TICKS(30)); }
+                        ESP_LOGI(TAG, "  rejoue #%d (%d bits, gap=%ums)", i, capbits[i], (unsigned)capgap[i]);
+                    }
+                    ESP_LOGI(TAG, "  TEST 1 fini. Le volet a bouge ?");
+                    session_done = 1;
+                }
+
             } else {
-                ESP_LOGI(TAG, ">>> Appui court : CAPTURE - presse ta 0x813 dans les 6 s... <<<");
-                cap_n = cc1101_rx_listen_bits(6000, cap, (int)sizeof(cap) - 1);
-                if (cap_n >= 64) {
-                    uint32_t hop = 0;    for (int i = 0;  i < 32; i++) hop    = (hop << 1)    | (cap[i]-'0');
-                    uint32_t serial = 0; for (int i = 59; i >= 32; i--) serial = (serial << 1) | (cap[i]-'0');
-                    int btn = 0;         for (int i = 60; i < 64; i++) btn    = (btn << 1)    | (cap[i]-'0');
-                    int rpt = (cap_n >= 66) ? cap[65]-'0' : -1;
-                    ESP_LOGI(TAG, "  CAPTUREE: serial=0x%05X fam=0x%03X btn=0x%X RPT=%d hop=0x%08X (%d bits) -> appui LONG pour rejouer",
-                             (unsigned)serial, (unsigned)(serial & 0x3FFu), btn, rpt, (unsigned)hop, cap_n);
-                } else {
-                    ESP_LOGW(TAG, "  rien capte (nb=%d). Approche la telecommande du module et reessaie.", cap_n);
+                /* ---- LONG : TEST 2 = derniere trame VIA OpenProfalux ---- */
+                if (count == 0) { ESP_LOGW(TAG, ">>> TEST 2 : rien a rejouer (capture d'abord) <<<"); }
+                else {
+                    int i = count - 1;
+                    /* vrai hop KeeLoq = lecture LSB-first des bits d'air (bit-reverse du MSB-first) */
+                    uint32_t hop_true = 0; for (int b = 0; b < 32; b++) hop_true |= (uint32_t)(capbuf[i][b]-'0') << b;
+                    uint32_t serial   = 0; for (int b = 59; b >= 32; b--) serial = (serial << 1) | (capbuf[i][b]-'0');
+                    int btn = 0;           for (int b = 60; b < 64; b++)  btn    = (btn    << 1) | (capbuf[i][b]-'0');
+                    uint8_t frame[9];
+                    pfx_frame_build_with_hop(hop_true, serial, (uint8_t)btn, frame);
+                    ESP_LOGI(TAG, ">>> TEST 2 : trame #%d via OpenProfalux (serial=0x%05X btn=0x%X hop_true=0x%08X) x3 <<<",
+                             i, (unsigned)serial, btn, (unsigned)hop_true);
+                    for (int k = 0; k < 3; k++) { cc1101_tx_ook_frame(frame, 66); vTaskDelay(pdMS_TO_TICKS(30)); }
+                    ESP_LOGI(TAG, "  TEST 2 fini. Le volet a bouge ? (si oui = OpenProfalux emet correctement)");
+                    session_done = 1;
                 }
             }
             now = 1;                            /* relache */

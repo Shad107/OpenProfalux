@@ -130,6 +130,34 @@ void pfx_frame_build(const pfx_tx_state_t *st, uint8_t button, uint8_t frame[9])
     frame[8] = 0;
 }
 
+/* TEST 2 : identique a pfx_frame_build mais avec un hop KeeLoq DEJA calcule (injecte),
+ * serial et button fournis, SANS keeloq_encrypt. Sert a rejouer via NOTRE pipeline de
+ * sortie un hop capte reel => prouve que l'emission OpenProfalux (sérialisation + OOK)
+ * est byte-correcte. IMPORTANT : hop_true doit etre le VRAI hop KeeLoq = bit-reverse de
+ * la valeur lue MSB-first sur l'air. Convention validee 7/7 contre les captures reelles
+ * (config C). Le reste (reversal LSB-first, serial, button) est identique a pfx_frame_build. */
+void pfx_frame_build_with_hop(uint32_t hop_true, uint32_t serial, uint8_t button, uint8_t frame[9]) {
+    uint32_t enc = hop_true;
+#if PFX_HOP_LSB_FIRST
+    uint32_t enc_tx = 0;
+    for (int k = 0; k < 32; k++) enc_tx |= ((enc >> k) & 1u) << (31 - k);
+#else
+    uint32_t enc_tx = enc;
+#endif
+    memset(frame, 0, 9);
+    frame[0] = (enc_tx >> 24) & 0xFF;
+    frame[1] = (enc_tx >> 16) & 0xFF;
+    frame[2] = (enc_tx >>  8) & 0xFF;
+    frame[3] = (enc_tx >>  0) & 0xFF;
+    uint32_t sr = 0;
+    for (int k = 0; k < 28; k++) sr |= ((serial >> k) & 1u) << (27 - k);
+    frame[4] = (sr >> 20) & 0xFF;
+    frame[5] = (sr >> 12) & 0xFF;
+    frame[6] = (sr >>  4) & 0xFF;
+    frame[7] = ((sr & 0xF) << 4) | (button & 0xF);
+    frame[8] = 0;
+}
+
 int pfx_frame_parse(const uint8_t frame[9], pfx_rx_frame_t *out) {
     if (!frame || !out) return -1;
     uint32_t enc = ((uint32_t)frame[0] << 24) | ((uint32_t)frame[1] << 16)
