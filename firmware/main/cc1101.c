@@ -22,9 +22,7 @@ static spi_device_handle_t s_spi = NULL;
 static rmt_channel_handle_t s_cap = NULL;
 static QueueHandle_t s_capq = NULL;
 static rmt_symbol_word_t s_capbuf[512];
-static rmt_channel_handle_t s_rxcap = NULL;   /* RX dedie sur GDO2 (pas de conflit avec TX GDO0) */
-static QueueHandle_t s_rxq = NULL;
-#define CC1101_PIN_GDO2 21
+/* RX et auto-capture partagent l'unique canal RMT s_cap sur GDO0 (memoire RMT limitee). */
 static cc1101_rx_cb_t     s_rx_cb = NULL;
 static TaskHandle_t       s_rx_task = NULL;
 static volatile bool      s_rx_running = false;
@@ -315,18 +313,13 @@ int cc1101_tx_and_capture_bits(const uint8_t *frame, size_t bits, char *out_bits
 /* Ecoute (RX) pendant timeout_ms : bascule la puce en RX, capture GDO0 (donnee
  * demodulee) et decode la 1re trame recue. Retourne nbits (<0 = rien / erreur). */
 int cc1101_rx_listen_bits(uint32_t timeout_ms, char *out_bits, int max_bits) {
-    /* RX sur GDO2 (GPIO21) : pin DEDIE, comme le sniffer. GDO0 (TX) intouche. */
-    if (!s_rxcap) {
-        s_rxq = xQueueCreate(2, sizeof(rmt_rx_done_event_data_t));
-        rmt_rx_channel_config_t c = {0};
-        c.clk_src = RMT_CLK_SRC_DEFAULT; c.resolution_hz = 1000000;
-        c.mem_block_symbols = 512; c.gpio_num = CC1101_PIN_GDO2;
-        if (rmt_new_rx_channel(&c, &s_rxcap) != ESP_OK) { ESP_LOGW(TAG, "RMT GDO2 (GPIO21) init KO"); s_rxcap = NULL; return -1; }
-        rmt_rx_event_callbacks_t cb = { .on_recv_done = cc_cap_cb };
-        rmt_rx_register_event_callbacks(s_rxcap, &cb, s_rxq);
-        rmt_enable(s_rxcap);
-    }
-    cc1101_write_reg(0x00, 0x0D);   /* IOCFG2 = donnee serie demodulee sur GDO2 */
+    /* RX sur GDO0 (GPIO25) comme le sniffer. On REUTILISE l'unique canal RMT s_cap :
+     * l'ESP32 n'a pas assez de memoire RMT pour un 2e canal de 512 symboles
+     * ("no free rx channels"). GDO0 est prouve OK par le SELFVERIFY au boot. */
+    if (!s_cap && cc1101_capture_init() != 0) return -1;
+    /* GDO0 en INPUT : la CC1101 (RX, IOCFG0=0x0D) sort la donnee demodulee, on la lit */
+    gpio_set_direction(CC1101_PIN_GDO0, GPIO_MODE_INPUT);
+    cc1101_write_reg(0x02, 0x0D);   /* IOCFG0 = donnee serie demodulee sur GDO0 */
     cc1101_write_reg(0x0B, 0x06);   /* FSCTRL1 */
     cc1101_write_reg(0x19, 0x14);   /* FOCCFG  */
     cc1101_write_reg(0x1B, 0x07);   /* AGCCTRL2 gain max */
@@ -341,15 +334,17 @@ int cc1101_rx_listen_bits(uint32_t timeout_ms, char *out_bits, int max_bits) {
         if ((cc1101_read_reg(CC_MARCSTATE | 0x40) & 0x1F) == 0x0D) break;
         vTaskDelay(pdMS_TO_TICKS(1));
     }
-    ESP_LOGI(TAG, "RX(GDO2): MARCSTATE=0x%02X (0x0D=RX attendu)", cc1101_read_reg(CC_MARCSTATE | 0x40) & 0x1F);
+    ESP_LOGI(TAG, "RX(GDO0): MARCSTATE=0x%02X (0x0D=RX attendu)", cc1101_read_reg(CC_MARCSTATE | 0x40) & 0x1F);
     rmt_receive_config_t rc = { .signal_range_min_ns = 2000, .signal_range_max_ns = 8000000 };
-    if (rmt_receive(s_rxcap, s_capbuf, sizeof(s_capbuf), &rc) != ESP_OK) { strobe(CC_SIDLE); return -2; }
+    if (rmt_receive(s_cap, s_capbuf, sizeof(s_capbuf), &rc) != ESP_OK) {
+        strobe(CC_SIDLE); gpio_set_direction(CC1101_PIN_GDO0, GPIO_MODE_INPUT_OUTPUT); return -2;
+    }
     rmt_rx_done_event_data_t ev;
     int r = -3;
-    if (xQueueReceive(s_rxq, &ev, pdMS_TO_TICKS(timeout_ms)) == pdTRUE)
+    if (xQueueReceive(s_capq, &ev, pdMS_TO_TICKS(timeout_ms)) == pdTRUE)
         r = decode_rmt(ev.received_symbols, ev.num_symbols, out_bits, max_bits);
     strobe(CC_SIDLE);
-    cc1101_write_reg(0x00, 0x0E);   /* IOCFG2 = carrier sense (defaut) */
+    gpio_set_direction(CC1101_PIN_GDO0, GPIO_MODE_INPUT_OUTPUT);   /* restaure pour le TX bit-bang */
     return r;
 }
 
