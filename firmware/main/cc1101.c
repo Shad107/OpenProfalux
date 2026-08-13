@@ -336,21 +336,24 @@ int cc1101_rx_listen_bits(uint32_t timeout_ms, char *out_bits, int max_bits) {
         vTaskDelay(pdMS_TO_TICKS(1));
     }
     ESP_LOGI(TAG, "RX(GDO0): MARCSTATE=0x%02X (0x0D=RX attendu)", cc1101_read_reg(CC_MARCSTATE | 0x40) & 0x1F);
-    /* OOK sans squelch => bruit continu sur GDO0. Comme le sniffer : on BOUCLE,
-     * on re-arme la RMT et on decode chaque paquet ; on garde le 1er qui a un
-     * header valide (>=64 bits). Les paquets de bruit (pas de header) sont ignores.
-     * Le filtre min 3 us elimine les glitches de bruit rapides. */
+    /* OOK sans squelch => bruit continu sur GDO0. Comme le sniffer : on ARME une
+     * fois, puis on re-arme la RMT UNIQUEMENT apres avoir recu un paquet (sinon la
+     * reception precedente est encore en cours => "channel not in enable state").
+     * On garde le 1er paquet avec header valide (>=64 bits) ; le bruit est ignore.
+     * Reset propre du canal partage avant de commencer (reception pendante possible). */
+    rmt_disable(s_cap); rmt_enable(s_cap); xQueueReset(s_capq);
     rmt_receive_config_t rc = { .signal_range_min_ns = 3000, .signal_range_max_ns = 8000000 };
     int64_t t_end = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
     int r = -3;
     rmt_rx_done_event_data_t ev;
-    while (esp_timer_get_time() < t_end) {
-        if (rmt_receive(s_cap, s_capbuf, sizeof(s_capbuf), &rc) != ESP_OK) { r = -2; break; }
-        if (xQueueReceive(s_capq, &ev, pdMS_TO_TICKS(250)) == pdTRUE) {
+    if (rmt_receive(s_cap, s_capbuf, sizeof(s_capbuf), &rc) == ESP_OK) {
+        while (esp_timer_get_time() < t_end) {
+            if (xQueueReceive(s_capq, &ev, pdMS_TO_TICKS(250)) != pdTRUE) continue;  /* tjrs en RX */
             int n = decode_rmt(ev.received_symbols, ev.num_symbols, out_bits, max_bits);
-            if (n >= 64) { r = n; break; }   /* vraie trame trouvee parmi le bruit */
+            if (n >= 64) { r = n; break; }                                  /* vraie trame */
+            if (rmt_receive(s_cap, s_capbuf, sizeof(s_capbuf), &rc) != ESP_OK) break;  /* re-arme */
         }
-    }
+    } else r = -2;
     strobe(CC_SIDLE);
     gpio_set_direction(CC1101_PIN_GDO0, GPIO_MODE_INPUT_OUTPUT);   /* restaure pour le TX bit-bang */
     return r;
