@@ -224,8 +224,7 @@ void app_main(void) {
      * appui sur le bouton integre de l'ATOM Lite (GPIO39) -> burst d'appairage. */
     gpio_config_t btn = { .pin_bit_mask = 1ULL << 39, .mode = GPIO_MODE_INPUT };
     gpio_config(&btn);
-    ESP_LOGI(TAG, "PRET. Bouton ATOM (G39) = burst appairage. Identite serial=0x%08X counter=%u.",
-             (unsigned)g_state.serial, (unsigned)g_state.counter);
+    ESP_LOGI(TAG, "PRET. Bouton G39 : 1 appui=ENREGISTRE sequence | 2=rejeu BRUT | 3=via OpenProfalux | 4+=efface NVS.");
 
     /* Bouton ATOM (G39) :
      *   - appui LONG (>1,5 s) = ENROLEMENT (burst bouton PROG 0x8)
