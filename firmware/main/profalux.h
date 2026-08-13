@@ -34,6 +34,11 @@ int  pfx_state_reset(pfx_tx_state_t *st);  /* Force new random (=re-pair) */
 /* Build 66-bit frame in 9-byte buffer */
 void pfx_frame_build(const pfx_tx_state_t *st, uint8_t button, uint8_t frame[9]);
 
+/* TEST 2 : build sans chiffrement, hop KeeLoq injecte (rejeu d'un hop reel via notre
+ * pipeline de sortie = preuve d'emission correcte). hop_true = VRAI hop KeeLoq
+ * (= bit-reverse de la valeur MSB-first lue sur l'air). Convention validee 7/7. */
+void pfx_frame_build_with_hop(uint32_t hop_true, uint32_t serial, uint8_t button, uint8_t frame[9]);
+
 /* Parse received 66-bit frame */
 int  pfx_frame_parse(const uint8_t frame[9], pfx_rx_frame_t *out);
 
