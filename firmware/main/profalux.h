@@ -48,6 +48,27 @@ void pfx_emit_burst(pfx_tx_state_t *st, uint8_t button, uint32_t n_frames, uint3
  * Utilise pour l'etape 2 de la notice (STOP-en-P maintenu 5 s = bouton 0x8). */
 void pfx_emit_hold(pfx_tx_state_t *st, uint8_t button, uint32_t duration_ms);
 
+/* SCAN : emet l'enrolement (bouton 0x8, counter 2) pour les 63 identites DEVMEL
+ * en boucle pendant duration_ms. Si UNE identite est valide pour ce moteur, elle
+ * sera enrolee. Sert a tester tout le pool d'un coup. */
+void pfx_emit_enroll_all(uint32_t duration_ms);
+
+/* SCAN : emet une commande (button) pour les 63 identites DEVMEL, counter qui
+ * avance a chaque appel. Le moteur repond a celle qu'il a apprise. */
+void pfx_emit_command_all(uint8_t button);
+
+/* Auto-verif : emet une trame, la RE-CAPTURE sur GDO0 (RMT) et la decode, pour
+ * confirmer que ce qu'on emet est byte-parfait (serial, famille, bouton, RPT). */
+void pfx_selfverify(pfx_tx_state_t *st, uint8_t button);
+
+/* Demo : spam n trames vers le moteur (le jamme = prouve qu'il recoit). */
+void pfx_spam(pfx_tx_state_t *st, uint8_t button, int n);
+
+/* Pas-a-pas : enrole UNE identite (slot 1..63) = une pression propre 0x8 + ecoute
+ * RX 3s. Piloter cette identite avec un bouton (montee/stop/descente). */
+void pfx_emit_enroll_slot(int slot);
+void pfx_emit_command_slot(int slot, uint8_t button);
+
 /* Emit single command (=3 repeats HCS301-style) */
 void pfx_emit_command(pfx_tx_state_t *st, uint8_t button);
 

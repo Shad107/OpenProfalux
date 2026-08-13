@@ -13,6 +13,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_log.h>
+#include <esp_timer.h>
 #include <nvs_flash.h>
 #include <nvs.h>
 
@@ -121,6 +122,7 @@ static void on_listen_stop(void) {
 /* ────── App entry ────── */
 
 void app_main(void) {
+    esp_log_level_set("*", ESP_LOG_INFO);   /* coupe le flot verbeux SPI/RMT: log lisible */
     ESP_LOGI(TAG, "╔══════════════════════════════════════════╗");
     ESP_LOGI(TAG, "║ OpenProfalux firmware — target=" TARGET_NAME);
     ESP_LOGI(TAG, "╚══════════════════════════════════════════╝");
@@ -148,6 +150,8 @@ void app_main(void) {
         ESP_LOGI(TAG, "TX SELFTEST OK : la puce emet (MARCSTATE=TX).");
     else
         ESP_LOGW(TAG, "TX SELFTEST ECHEC : puce NE passe PAS en TX (config/SPI).");
+    /* 4c. Auto-verif trame : re-capture GDO0 de notre propre emission (slot 54, 0x8). */
+    pfx_selfverify(&g_state, PFX_BTN_PROG);
 
     /* 5. Wi-Fi */
     wifi_bridge_init();
@@ -188,10 +192,11 @@ void app_main(void) {
      *   - appui LONG (>1,5 s) = ENROLEMENT (burst bouton PROG 0x8)
      *   - appui court        = PILOTAGE, cycle MONTEE -> STOP -> DESCENTE
      * Une seule image pour enroler puis piloter sans reflasher. */
-    const uint8_t  seq[3]  = { PFX_BTN_UP, PFX_BTN_STOP, PFX_BTN_DOWN };
-    const char    *seqn[3] = { "MONTEE", "STOP", "DESCENTE" };
-    int si = 0;
-
+    /* MODE CAPTURE + REJEU (famille RollJam) :
+     *   - appui court = CAPTURE une vraie trame (RX ~6s), la stocke + logge
+     *   - appui LONG  = REJOUE la trame captee (TX x10)
+     * Rappel : le rejeu ne marche que si le moteur n'a PAS entendu la trame (rolling). */
+    char cap[80]; int cap_n = 0;
     int prev = 1; uint32_t hb = 0;
     while (1) {
         int now = gpio_get_level(39);
@@ -199,14 +204,26 @@ void app_main(void) {
             uint32_t held = 0;
             while (gpio_get_level(39) == 0) { vTaskDelay(pdMS_TO_TICKS(20)); held += 20; }
             if (held >= 1500) {
-                ESP_LOGI(TAG, ">>> Appui LONG (%ums) : ENROLEMENT (bouton PROG 0x8) <<<",
-                         (unsigned)held);
-                on_pair(s_device_name);
+                if (cap_n >= 64) {
+                    ESP_LOGI(TAG, ">>> Appui LONG : REJEU trame captee (%d bits) x10 <<<", cap_n);
+                    for (int k = 0; k < 10; k++) { cc1101_tx_raw_bits(cap, cap_n); vTaskDelay(pdMS_TO_TICKS(30)); }
+                    ESP_LOGI(TAG, "  rejeu fini. Le volet a bouge ?");
+                } else {
+                    ESP_LOGW(TAG, ">>> Appui LONG : rien a rejouer (fais un appui court pour capturer d'abord) <<<");
+                }
             } else {
-                ESP_LOGI(TAG, ">>> Appui court : commande %s (serial=0x%08X counter=%u) <<<",
-                         seqn[si], (unsigned)g_state.serial, (unsigned)g_state.counter);
-                pfx_emit_command(&g_state, seq[si]);
-                si = (si + 1) % 3;
+                ESP_LOGI(TAG, ">>> Appui court : CAPTURE - presse ta 0x813 dans les 6 s... <<<");
+                cap_n = cc1101_rx_listen_bits(6000, cap, (int)sizeof(cap) - 1);
+                if (cap_n >= 64) {
+                    uint32_t hop = 0;    for (int i = 0;  i < 32; i++) hop    = (hop << 1)    | (cap[i]-'0');
+                    uint32_t serial = 0; for (int i = 59; i >= 32; i--) serial = (serial << 1) | (cap[i]-'0');
+                    int btn = 0;         for (int i = 60; i < 64; i++) btn    = (btn << 1)    | (cap[i]-'0');
+                    int rpt = (cap_n >= 66) ? cap[65]-'0' : -1;
+                    ESP_LOGI(TAG, "  CAPTUREE: serial=0x%05X fam=0x%03X btn=0x%X RPT=%d hop=0x%08X (%d bits) -> appui LONG pour rejouer",
+                             (unsigned)serial, (unsigned)(serial & 0x3FFu), btn, rpt, (unsigned)hop, cap_n);
+                } else {
+                    ESP_LOGW(TAG, "  rien capte (nb=%d). Approche la telecommande du module et reessaie.", cap_n);
+                }
             }
             now = 1;                            /* relache */
         }

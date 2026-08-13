@@ -182,31 +182,178 @@ void pfx_emit_burst(pfx_tx_state_t *st, uint8_t button, uint32_t n_frames, uint3
 
 void pfx_emit_hold(pfx_tx_state_t *st, uint8_t button, uint32_t duration_ms) {
     uint8_t frame[9];
-    /* Compteur INCREMENTE a chaque trame (vrai code tournant) : sinon on rejoue
-     * la meme trame et le moteur la rejette comme un rejeu. Depart au counter
-     * courant (= 2 au premier appairage), donc 1re trame = PAIRMODE 0xF029775B. */
-    ESP_LOGI(TAG, "EMIT bouton 0x%X depuis counter=%u pendant %u ms (compteur incremente)",
+    /* Fidele au reel (mesure sniffer 2026-08-12) : UN seul appui = UN compteur
+     * FIXE, meme code repete, avec le bit RPT (bit65) a 0 sur la 1re trame puis 1.
+     * Le compteur roule ENTRE appuis, pas pendant. On incremente donc une seule
+     * fois a la fin (= relachement), pour le prochain appui. */
+    pfx_frame_build(st, button, frame);       /* code fixe pour toute la tenue */
+    ESP_LOGI(TAG, "EMIT bouton 0x%X counter=%u FIXE pendant %u ms (RPT 0->1)",
              button, (unsigned)st->counter, (unsigned)duration_ms);
     uint32_t elapsed = 0, n = 0;
     while (elapsed < duration_ms) {
-        pfx_frame_build(st, button, frame);   /* trame avec le counter courant */
+        frame[8] = (n == 0) ? 0x00 : 0x40;    /* bit65 RPT: 0 sur la 1re trame, 1 ensuite */
         cc1101_tx_ook_frame(frame, 66);
-        st->counter++;                        /* increment chaque trame */
-        if ((n & 0x0F) == 0) pfx_state_save(st);
         vTaskDelay(pdMS_TO_TICKS(60));
         elapsed += 165; n++;
     }
+    st->counter++;                            /* un seul increment (relachement) */
     pfx_state_save(st);
-    ESP_LOGI(TAG, "EMIT termine: %u trames, counter->%u", (unsigned)n, (unsigned)st->counter);
+    ESP_LOGI(TAG, "EMIT termine: %u trames (code fixe), counter->%u", (unsigned)n, (unsigned)st->counter);
+}
+
+/* Compteur de pilotage pour le mode scan (apres enrol a counter=2). */
+static uint16_t s_scan_pilot_counter = 3;
+
+/* Pendant une pause : ECOUTE en RX et logge toute trame recue (confirme que la
+ * choregraphie de la vraie telecommande passe, observe le rolling / le moteur). */
+static void pfx_listen_and_log(uint32_t ms) {
+    char b[80];
+    int nb = cc1101_rx_listen_bits(ms, b, (int)sizeof(b) - 1);
+    if (nb >= 64) {
+        uint32_t hop = 0;    for (int i = 0;  i < 32; i++) hop    = (hop << 1)    | (b[i] - '0');
+        uint32_t serial = 0; for (int i = 59; i >= 32; i--) serial = (serial << 1) | (b[i] - '0');
+        int btn = 0;         for (int i = 60; i < 64; i++) btn    = (btn << 1)    | (b[i] - '0');
+        int rpt = (nb >= 66) ? b[65] - '0' : -1;
+        ESP_LOGI(TAG, "  << RX pendant pause: serial=0x%05X fam=0x%03X btn=0x%X RPT=%d hop=0x%08X (%d bits)",
+                 (unsigned)serial, (unsigned)(serial & 0x3FFu), btn, rpt, (unsigned)hop, nb);
+    }
+}
+
+void pfx_emit_enroll_all(uint32_t pause_ms) {
+    uint8_t frame[9];
+    pfx_tx_state_t s;
+    ESP_LOGI(TAG, "SCAN ENROLL ESPACE: 63 identites, une pression propre chacune, PAUSE %u ms entre (pas de flood)",
+             (unsigned)pause_ms);
+    for (int slot = 1; slot <= 63; slot++) {
+        uint8_t idx;
+        s.serial = ((uint32_t)slot << 12) | 0x067u;
+        if (!pfx_key_for_serial(s.serial, &s.crypt_key, &idx)) continue;
+        s.discrimination = s.serial & 0xFFFu;
+        s.counter = 2;                           /* counter d'enrolement fixe */
+        pfx_frame_build(&s, 0x08, frame);        /* bouton 0x8 = enrolement */
+        uint32_t plain = ((uint32_t)0x8u<<28)|((uint32_t)(s.discrimination & 0xFFFu)<<16)|s.counter;
+        uint32_t klhop = keeloq_encrypt(plain, s.crypt_key);
+        ESP_LOGI(TAG, "  [%2d/63] serial=0x%05X fam=0x%03X idx=%u key=0x%016llX cnt=2 btn=0x8 klhop=0x%08X",
+                 slot, (unsigned)s.serial, (unsigned)(s.serial & 0x3FFu), idx,
+                 (unsigned long long)s.crypt_key, (unsigned)klhop);
+        /* une "pression" = ~10 trames, RPT=0 sur la 1re puis RPT=1 */
+        for (int r = 0; r < 10; r++) {
+            frame[8] = (r == 0) ? 0x00 : 0x40;
+            cc1101_tx_ook_frame(frame, 66);
+            vTaskDelay(pdMS_TO_TICKS(5));
+        }
+        ESP_LOGI(TAG, "         10 trames emises (RPT 0->1) -> ECOUTE %u ms (canal libre)", (unsigned)pause_ms);
+        pfx_listen_and_log(pause_ms);            /* pause = ECOUTE RX (pas de jamming) */
+    }
+    ESP_LOGI(TAG, "SCAN ENROLL ESPACE termine (63 identites balayees)");
+}
+
+void pfx_emit_command_all(uint8_t button) {
+    uint8_t frame[9];
+    pfx_tx_state_t s;
+    uint16_t c = s_scan_pilot_counter++;
+    const uint32_t pause_ms = 1500;
+    ESP_LOGI(TAG, "SCAN CMD ESPACE: 63 identites, bouton 0x%X, counter=%u, pause %u ms entre chaque",
+             button, (unsigned)c, (unsigned)pause_ms);
+    for (int slot = 1; slot <= 63; slot++) {
+        uint8_t idx;
+        s.serial = ((uint32_t)slot << 12) | 0x067u;
+        if (!pfx_key_for_serial(s.serial, &s.crypt_key, &idx)) continue;
+        s.discrimination = s.serial & 0xFFFu;
+        s.counter = c;
+        pfx_frame_build(&s, button, frame);
+        uint32_t plain = ((uint32_t)(button & 0xFu)<<28)|((uint32_t)(s.discrimination & 0xFFFu)<<16)|s.counter;
+        uint32_t klhop = keeloq_encrypt(plain, s.crypt_key);
+        ESP_LOGI(TAG, "  [%2d/63] serial=0x%05X fam=0x%03X key=0x%016llX cnt=%u btn=0x%X klhop=0x%08X",
+                 slot, (unsigned)s.serial, (unsigned)(s.serial & 0x3FFu), (unsigned long long)s.crypt_key,
+                 (unsigned)s.counter, button, (unsigned)klhop);
+        for (int r = 0; r < 10; r++) {           /* une pression propre, RPT 0 puis 1 */
+            frame[8] = (r == 0) ? 0x00 : 0x40;
+            cc1101_tx_ook_frame(frame, 66);
+            vTaskDelay(pdMS_TO_TICKS(5));
+        }
+        ESP_LOGI(TAG, "         10 trames (RPT 0->1) -> ECOUTE %u ms (canal libre)", (unsigned)pause_ms);
+        pfx_listen_and_log(pause_ms);            /* pause = ECOUTE RX */
+    }
+    ESP_LOGI(TAG, "SCAN CMD ESPACE termine");
+}
+
+void pfx_emit_enroll_slot(int slot) {
+    uint8_t frame[9]; pfx_tx_state_t s; uint8_t idx;
+    s.serial = ((uint32_t)slot << 12) | 0x067u;
+    if (!pfx_key_for_serial(s.serial, &s.crypt_key, &idx)) { ESP_LOGW(TAG, "slot %d invalide", slot); return; }
+    s.discrimination = s.serial & 0xFFFu; s.counter = 2;
+    pfx_frame_build(&s, 0x08, frame);
+    uint32_t plain = ((uint32_t)0x8u<<28)|((uint32_t)(s.discrimination&0xFFFu)<<16)|s.counter;
+    uint32_t klhop = keeloq_encrypt(plain, s.crypt_key);
+    ESP_LOGI(TAG, "ENROLEMENT slot %d/63 : serial=0x%05X fam=0x%03X idx=%u key=0x%016llX cnt=2 btn=0x8 klhop=0x%08X",
+             slot, (unsigned)s.serial, (unsigned)(s.serial & 0x3FFu), idx,
+             (unsigned long long)s.crypt_key, (unsigned)klhop);
+    for (int r = 0; r < 10; r++) { frame[8] = (r==0)?0x00:0x40; cc1101_tx_ook_frame(frame, 66); vTaskDelay(pdMS_TO_TICKS(5)); }
+    ESP_LOGI(TAG, "  10 trames emises (RPT 0->1) pour slot %d. Fais la choregraphie 0x813 dans la minute.", slot);
+}
+
+void pfx_emit_command_slot(int slot, uint8_t button) {
+    uint8_t frame[9]; pfx_tx_state_t s; uint8_t idx;
+    s.serial = ((uint32_t)slot << 12) | 0x067u;
+    if (!pfx_key_for_serial(s.serial, &s.crypt_key, &idx)) { ESP_LOGW(TAG, "slot %d invalide", slot); return; }
+    s.discrimination = s.serial & 0xFFFu; s.counter = s_scan_pilot_counter++;
+    pfx_frame_build(&s, button, frame);
+    ESP_LOGI(TAG, "CMD slot %d/63 bouton 0x%X cnt=%u serial=0x%05X", slot, button, (unsigned)s.counter, (unsigned)s.serial);
+    for (int r = 0; r < 10; r++) { frame[8] = (r==0)?0x00:0x40; cc1101_tx_ook_frame(frame, 66); vTaskDelay(pdMS_TO_TICKS(5)); }
+}
+
+void pfx_spam(pfx_tx_state_t *st, uint8_t button, int n) {
+    uint8_t frame[9];
+    ESP_LOGI(TAG, "SPAM: %d trames vers le moteur (serial=0x%05X btn=0x%X) ~%ds - le moteur va etre JAMME",
+             n, (unsigned)st->serial, button, n / 10);
+    for (int i = 0; i < n; i++) {
+        pfx_frame_build(st, button, frame);
+        frame[8] = (i == 0) ? 0x00 : 0x40;
+        cc1101_tx_ook_frame(frame, 66);
+        st->counter++;
+        if ((i & 0x07) == 0) vTaskDelay(pdMS_TO_TICKS(5));   /* yield watchdog */
+    }
+    pfx_state_save(st);
+    ESP_LOGI(TAG, "SPAM fini (%d trames). Pendant ce temps ta vraie telecommande NE pilotait PAS", n);
+    ESP_LOGI(TAG, "  => preuve que le moteur RECOIT notre signal (jamming). Teste ta 0x813 : elle remarche apres.");
+}
+
+void pfx_selfverify(pfx_tx_state_t *st, uint8_t button) {
+    uint8_t frame[9];
+    pfx_frame_build(st, button, frame);
+    uint32_t plain = ((uint32_t)(button & 0xFu) << 28)
+                   | ((uint32_t)(st->discrimination & 0xFFFu) << 16) | st->counter;
+    uint32_t klhop = keeloq_encrypt(plain, st->crypt_key);
+    ESP_LOGI(TAG, "SELFVERIFY emis : serial=0x%05X fam=0x%03X btn=0x%X cnt=%u klhop=0x%08X",
+             (unsigned)st->serial, (unsigned)(st->serial & 0x3FFu), button,
+             (unsigned)st->counter, (unsigned)klhop);
+    char b[80];
+    int nb = cc1101_tx_and_capture_bits(frame, 66, b, (int)sizeof(b) - 1);
+    if (nb < 64) {
+        ESP_LOGW(TAG, "SELFVERIFY capte: KO (nbits=%d) - GDO0 non relu (conflit RMT/bit-bang ?)", nb);
+        return;
+    }
+    uint32_t hop = 0;    for (int i = 0;  i < 32; i++) hop    = (hop << 1)    | (b[i] - '0');
+    uint32_t serial = 0; for (int i = 59; i >= 32; i--) serial = (serial << 1) | (b[i] - '0');  /* LSB-first */
+    int btn = 0;         for (int i = 60; i < 64; i++) btn    = (btn << 1)    | (b[i] - '0');
+    int rpt = (nb >= 66) ? b[65] - '0' : -1;
+    ESP_LOGI(TAG, "SELFVERIFY capte: nbits=%d serial=0x%05X fam=0x%03X btn=0x%X RPT=%d wire_hop=0x%08X",
+             nb, (unsigned)serial, (unsigned)(serial & 0x3FFu), btn, rpt, (unsigned)hop);
+    ESP_LOGI(TAG, "SELFVERIFY -> serial:%s  bouton:%s",
+             (serial == st->serial) ? "MATCH" : "DIFF", (btn == button) ? "MATCH" : "DIFF");
 }
 
 void pfx_emit_command(pfx_tx_state_t *st, uint8_t button) {
     uint8_t frame[9];
-    for (int i = 0; i < 3; i++) {  /* HCS301 typical = 3 repeats */
-        pfx_frame_build(st, button, frame);
+    /* UN appui = UN compteur, repete ~8x avec RPT 0 puis 1 (comme le reel).
+     * Incremente une seule fois a la fin, pas a chaque repetition. */
+    pfx_frame_build(st, button, frame);
+    for (int i = 0; i < 8; i++) {
+        frame[8] = (i == 0) ? 0x00 : 0x40;   /* bit65 RPT: 0 puis 1 */
         cc1101_tx_ook_frame(frame, 66);
-        st->counter++;
         vTaskDelay(pdMS_TO_TICKS(50));
     }
+    st->counter++;
     pfx_state_save(st);
 }
