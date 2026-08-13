@@ -13,10 +13,18 @@
 #include <driver/gpio.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <freertos/queue.h>
 #include <esp_rom_sys.h>
+#include <driver/rmt_rx.h>
 
 static const char *TAG = "cc1101";
 static spi_device_handle_t s_spi = NULL;
+static rmt_channel_handle_t s_cap = NULL;
+static QueueHandle_t s_capq = NULL;
+static rmt_symbol_word_t s_capbuf[512];
+static rmt_channel_handle_t s_rxcap = NULL;   /* RX dedie sur GDO2 (pas de conflit avec TX GDO0) */
+static QueueHandle_t s_rxq = NULL;
+#define CC1101_PIN_GDO2 21
 static cc1101_rx_cb_t     s_rx_cb = NULL;
 static TaskHandle_t       s_rx_task = NULL;
 static volatile bool      s_rx_running = false;
@@ -225,6 +233,124 @@ int cc1101_tx_ook_frame(const uint8_t *frame, size_t bits) {
     esp_rom_delay_us(2000);  /* Inter-frame gap */
     strobe(CC_SIDLE);
     return 0;
+}
+
+/* Rejoue une trame brute (chaine de bits '0'/'1' en ordre du fil) en OOK :
+ * preambule + entete + symboles HCS30x. Sert au replay d'une trame captee. */
+int cc1101_tx_raw_bits(const char *bits, int n) {
+    gpio_set_direction(CC1101_PIN_GDO0, GPIO_MODE_INPUT_OUTPUT);
+    strobe(CC_STX);
+    esp_rom_delay_us(800);
+    for (int i = 0; i < PROFALUX_PREAMBLE_ELEMENTS; i++) {
+        gpio_set_level(CC1101_PIN_GDO0, (i & 1) == 0);
+        esp_rom_delay_us(PROFALUX_TE_US);
+    }
+    gpio_set_level(CC1101_PIN_GDO0, 0);
+    esp_rom_delay_us(PROFALUX_HEADER_US);
+    for (int i = 0; i < n; i++) {
+        if (bits[i] == '1') { gpio_set_level(CC1101_PIN_GDO0, 1); esp_rom_delay_us(455);
+                              gpio_set_level(CC1101_PIN_GDO0, 0); esp_rom_delay_us(910); }
+        else                { gpio_set_level(CC1101_PIN_GDO0, 1); esp_rom_delay_us(910);
+                              gpio_set_level(CC1101_PIN_GDO0, 0); esp_rom_delay_us(455); }
+    }
+    gpio_set_level(CC1101_PIN_GDO0, 0);
+    esp_rom_delay_us(2000);
+    strobe(CC_SIDLE);
+    return 0;
+}
+
+/* ── Auto-capture : le RMT lit GDO0 pendant qu'on bit-bang (verifie la trame). ── */
+static bool IRAM_ATTR cc_cap_cb(rmt_channel_handle_t ch, const rmt_rx_done_event_data_t *e, void *ctx) {
+    BaseType_t hp = pdFALSE; xQueueSendFromISR((QueueHandle_t)ctx, e, &hp); return hp == pdTRUE;
+}
+
+int cc1101_capture_init(void) {
+    if (s_cap) return 0;
+    s_capq = xQueueCreate(2, sizeof(rmt_rx_done_event_data_t));
+    rmt_rx_channel_config_t c = {0};
+    c.clk_src = RMT_CLK_SRC_DEFAULT; c.resolution_hz = 1000000;
+    c.mem_block_symbols = 512; c.gpio_num = CC1101_PIN_GDO0;
+    if (rmt_new_rx_channel(&c, &s_cap) != ESP_OK) { ESP_LOGW(TAG, "RMT capture init KO"); s_cap = NULL; return -1; }
+    rmt_rx_event_callbacks_t cb = { .on_recv_done = cc_cap_cb };
+    rmt_rx_register_event_callbacks(s_cap, &cb, s_capq);
+    rmt_enable(s_cap);
+    /* RMT met GDO0 en input : on re-active la sortie pour pouvoir bit-banger */
+    gpio_set_direction(CC1101_PIN_GDO0, GPIO_MODE_INPUT_OUTPUT);
+    return 0;
+}
+
+/* Emet la trame ET capture GDO0, decode la forme d'onde en bits (ordre du fil).
+ * Retourne le nombre de bits decodes (<0 = erreur). bit=1 si HAUT court (H<680us). */
+/* Decode une capture RMT (forme d'onde OOK HCS30x) en bits. Retourne nbits. */
+static int decode_rmt(const rmt_symbol_word_t *sym, size_t n, char *out, int max_bits) {
+    int hdr = -1;
+    for (size_t i = 0; i < n; i++) {
+        if (!sym[i].level0 && sym[i].duration0 > 3500) { hdr = (int)i; break; }
+        if (!sym[i].level1 && sym[i].duration1 > 3500) { hdr = (int)i; break; }
+    }
+    if (hdr < 0) return -4;
+    int nb = 0;
+    for (size_t i = hdr + 1; i < n && nb < max_bits && nb < 66; i++) {
+        uint32_t hi = sym[i].level0 ? sym[i].duration0 : sym[i].duration1;
+        uint32_t lo = sym[i].level0 ? sym[i].duration1 : sym[i].duration0;
+        if (hi < 200 || hi > 1300) break;
+        out[nb++] = (hi < 680) ? '1' : '0';
+        if (lo > 2000) break;
+    }
+    out[nb] = 0;
+    return nb;
+}
+
+int cc1101_tx_and_capture_bits(const uint8_t *frame, size_t bits, char *out_bits, int max_bits) {
+    if (!s_cap && cc1101_capture_init() != 0) return -1;
+    gpio_set_direction(CC1101_PIN_GDO0, GPIO_MODE_INPUT_OUTPUT);   /* on pilote GDO0 (TX) */
+    rmt_receive_config_t rc = { .signal_range_min_ns = 2000, .signal_range_max_ns = 6000000 };
+    if (rmt_receive(s_cap, s_capbuf, sizeof(s_capbuf), &rc) != ESP_OK) return -2;
+    cc1101_tx_ook_frame(frame, bits);         /* bit-bang GDO0, RMT capture en parallele */
+    rmt_rx_done_event_data_t ev;
+    if (xQueueReceive(s_capq, &ev, pdMS_TO_TICKS(500)) != pdTRUE) return -3;
+    return decode_rmt(ev.received_symbols, ev.num_symbols, out_bits, max_bits);
+}
+
+/* Ecoute (RX) pendant timeout_ms : bascule la puce en RX, capture GDO0 (donnee
+ * demodulee) et decode la 1re trame recue. Retourne nbits (<0 = rien / erreur). */
+int cc1101_rx_listen_bits(uint32_t timeout_ms, char *out_bits, int max_bits) {
+    /* RX sur GDO2 (GPIO21) : pin DEDIE, comme le sniffer. GDO0 (TX) intouche. */
+    if (!s_rxcap) {
+        s_rxq = xQueueCreate(2, sizeof(rmt_rx_done_event_data_t));
+        rmt_rx_channel_config_t c = {0};
+        c.clk_src = RMT_CLK_SRC_DEFAULT; c.resolution_hz = 1000000;
+        c.mem_block_symbols = 512; c.gpio_num = CC1101_PIN_GDO2;
+        if (rmt_new_rx_channel(&c, &s_rxcap) != ESP_OK) { ESP_LOGW(TAG, "RMT GDO2 (GPIO21) init KO"); s_rxcap = NULL; return -1; }
+        rmt_rx_event_callbacks_t cb = { .on_recv_done = cc_cap_cb };
+        rmt_rx_register_event_callbacks(s_rxcap, &cb, s_rxq);
+        rmt_enable(s_rxcap);
+    }
+    cc1101_write_reg(0x00, 0x0D);   /* IOCFG2 = donnee serie demodulee sur GDO2 */
+    cc1101_write_reg(0x0B, 0x06);   /* FSCTRL1 */
+    cc1101_write_reg(0x19, 0x14);   /* FOCCFG  */
+    cc1101_write_reg(0x1B, 0x07);   /* AGCCTRL2 gain max */
+    cc1101_write_reg(0x1C, 0x00);   /* AGCCTRL1 */
+    cc1101_write_reg(0x1D, 0x91);   /* AGCCTRL0 */
+    strobe(CC_SIDLE); esp_rom_delay_us(200);
+    strobe(0x33);     /* SCAL */
+    vTaskDelay(pdMS_TO_TICKS(3));
+    strobe(0x3A);     /* SFRX */
+    strobe(0x34);     /* SRX */
+    for (int i = 0; i < 50; i++) {
+        if ((cc1101_read_reg(CC_MARCSTATE | 0x40) & 0x1F) == 0x0D) break;
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    ESP_LOGI(TAG, "RX(GDO2): MARCSTATE=0x%02X (0x0D=RX attendu)", cc1101_read_reg(CC_MARCSTATE | 0x40) & 0x1F);
+    rmt_receive_config_t rc = { .signal_range_min_ns = 2000, .signal_range_max_ns = 8000000 };
+    if (rmt_receive(s_rxcap, s_capbuf, sizeof(s_capbuf), &rc) != ESP_OK) { strobe(CC_SIDLE); return -2; }
+    rmt_rx_done_event_data_t ev;
+    int r = -3;
+    if (xQueueReceive(s_rxq, &ev, pdMS_TO_TICKS(timeout_ms)) == pdTRUE)
+        r = decode_rmt(ev.received_symbols, ev.num_symbols, out_bits, max_bits);
+    strobe(CC_SIDLE);
+    cc1101_write_reg(0x00, 0x0E);   /* IOCFG2 = carrier sense (defaut) */
+    return r;
 }
 
 /* --- RX --- */
