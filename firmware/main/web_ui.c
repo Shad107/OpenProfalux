@@ -65,11 +65,14 @@ static void learn_task(void *arg) {
         uint8_t btn = (uint8_t)bits_lsb(bits, 60, 4);
         bool match = s_lwant_stop ? (btn == 0x2) : (btn == 0x1 || btn == 0x4);
         if (!match) continue;                  /* mauvais bouton : on continue d'ecouter */
+        s_lrssi   = cc1101_get_rssi();
         strlcpy(s_lbits, bits, SH_BITS_LEN);
         s_lserial = bits_lsb(bits, 32, 28);
         s_lbtn    = btn;
-        s_lrssi   = cc1101_get_rssi();
         s_lready  = true;
+        /* fait aussi apparaitre la trame captee dans le journal RF debug (le ring
+         * n'est normalement alimente que par l'ecoute permanente, pas l'apprentissage) */
+        shutters_on_rx(s_lserial, s_lbtn, s_lrssi, bits_lsb(bits, 0, 32));
         break;
     }
     s_lactive = false;
