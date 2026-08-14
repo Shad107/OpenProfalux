@@ -5,6 +5,8 @@
 Firmware ESP32 + CC1101 open-source pour les volets **Profalux 868 MHz** (moteurs MAI-EMPX /
 MAI-EMNOE). Tout reste local : pas de cloud, pas de passerelle propriétaire, aucun fil à tirer.
 
+📖 **Montage pas à pas, photos et l'histoire complète du reverse** : [www.isno.fr/projets/openprofalux](https://www.isno.fr/projets/openprofalux)
+
 ## Le principe : cloner une télécommande, pas casser la crypto
 
 Les télécommandes Profalux sont en KeeLoq (rolling code), donc une trame est a priori
