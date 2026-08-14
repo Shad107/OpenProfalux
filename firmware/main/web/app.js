@@ -107,7 +107,29 @@ function renderLearnSlots() {
   if (hint) hint.textContent = id
     ? `Volet « ${id} » : clique Capturer, puis appuie une fois sur le bouton de ta télécommande (< 1 m du boîtier).`
     : 'Choisis un volet ci-dessus (ou crée-en un) pour activer la capture.';
+  updateRemoteNameField();
 }
+
+/* Nom de la telecommande : prerempli avec le nom actuel (modifiable via Renommer)
+ * quand le volet a deja une telecommande apprise ; vide + cache sinon. */
+function updateRemoteNameField() {
+  const inp = $('#cap-name'); if (!inp) return;
+  const btn = $('#rename-btn');
+  const vol = (statusCache.volets || []).find(x => x.id === activeVolet);
+  const serial = vol && vol.serials && vol.serials[0];
+  inp.dataset.serial = serial || '';
+  if (document.activeElement !== inp) inp.value = serial ? ((statusCache.remotes || {})[serial] || '') : '';
+  inp.placeholder = serial ? 'Nom de cette télécommande' : 'ex : Murale chambre parents';
+  if (btn) btn.hidden = !serial;
+}
+
+const renameBtn = $('#rename-btn');
+if (renameBtn) renameBtn.onclick = async () => {
+  const inp = $('#cap-name'); const serial = inp.dataset.serial;
+  if (!serial) return;
+  await api('/api/remote', { method: 'POST', body: JSON.stringify({ serial, name: inp.value.trim() }) });
+  toast('Télécommande renommée'); await loadStatus();
+};
 
 async function captureAction(action, btn) {
   const id = activeVolet;
@@ -121,6 +143,15 @@ async function captureAction(action, btn) {
     const r = await api('/api/learn/poll').catch(() => null);
     if (r && r.bits) {
       clearInterval(poll); learning = false;
+      /* meme volet = meme telecommande : refuse une trame d'un autre serial que
+       * celui deja appris (evite un stop d'une telecommande + montee d'une autre). */
+      const vol = (statusCache.volets || []).find(x => x.id === id);
+      const known = (vol && vol.serials) || [];
+      if (known.length && !known.includes(r.serial)) {
+        toast(`Pas la bonne télécommande : trame de ${r.serial}, le volet utilise ${known[0]}`);
+        renderLearnSlots();
+        return;
+      }
       const name = $('#cap-name').value.trim();
       if (name) await api('/api/remote', { method: 'POST', body: JSON.stringify({ serial: r.serial, name }) });
       await api('/api/learn/assign', { method: 'POST', body: JSON.stringify({ id, action, bits: r.bits }) });

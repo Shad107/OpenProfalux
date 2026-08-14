@@ -52,7 +52,9 @@
           <p class="sub">Choisis un volet (ou crée-le), puis capture chaque commande depuis ta vraie télécommande. Une capture par commande suffit, elle est rejouable à vie.</p>
           <div class="field"><label>Volet</label><div id="volet-picker" class="chips"></div></div>
           <div class="field" id="new-volet-row" hidden><input id="new-volet" placeholder="Nom du nouveau volet"></div>
-          <div class="field"><label>Nom de la télécommande (optionnel)</label><input id="cap-name" placeholder="ex : Murale chambre parents"></div>
+          <div class="field"><label>Nom de la télécommande</label>
+            <div class="row" style="flex-wrap:nowrap"><input id="cap-name" placeholder="ex : Murale chambre parents" style="flex:1;min-width:0">
+            <button id="rename-btn" class="btn" hidden>Renommer</button></div></div>
           <div id="learn-slots" class="slots"></div>
           <p class="hint" id="learn-hint">Choisis un volet ci-dessus pour activer la capture. Place-toi à moins d'un mètre du boîtier et appuie une fois sur le bon bouton.</p>
         </div>

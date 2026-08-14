@@ -76,6 +76,7 @@ select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--
 .card .sub{color:var(--muted);font-size:.85rem;margin:2px 0 14px}
 .card h3{margin:16px 0 9px}
 
+[hidden]{display:none!important}   /* une classe .field/.row ne doit jamais reafficher un element cache */
 .field{display:grid;gap:5px;margin-bottom:12px}
 .field label{font-size:.78rem;font-weight:600;color:var(--muted);letter-spacing:.01em}
 .field input[type=text],.field input[type=password],.field input[type=file],.field input:not([type]){width:100%;padding:9px 11px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font:inherit;font-size:.92rem}
