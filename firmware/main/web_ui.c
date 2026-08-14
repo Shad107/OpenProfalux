@@ -65,6 +65,7 @@ static void learn_task(void *arg) {
 /* ── Helpers HTTP ── */
 static esp_err_t send_asset(httpd_req_t *r, const char *type, const uint8_t *s, const uint8_t *e) {
     httpd_resp_set_type(r, type);
+    httpd_resp_set_hdr(r, "Cache-Control", "no-cache");   /* toujours revalider : pas d'UI perimee apres MAJ */
     return httpd_resp_send(r, (const char *)s, e - s);
 }
 static char *read_body(httpd_req_t *r) {
