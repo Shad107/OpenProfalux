@@ -36,6 +36,7 @@ esp_err_t ota_upload_begin(size_t total_bytes);
 esp_err_t ota_upload_data(const void *data, size_t len);
 esp_err_t ota_upload_end(void);
 esp_err_t ota_upload_abort(void);
+esp_err_t ota_pull_from_url(const char *url);   /* telecharge + flashe une image HTTPS (release GitHub) */
 esp_err_t ota_pull_from_url(const char *url);
 esp_err_t ota_rollback(void);
 esp_err_t ota_mark_valid(void);

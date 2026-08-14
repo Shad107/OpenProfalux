@@ -233,10 +233,10 @@ static void publish_volet_state(volet_t *v) {
 /* Publie la config HA discovery d'un cover (retained). Appele sous LOCK. */
 static void announce_one(volet_t *v) {
     if (!s_mqtt_ready) return;
-    char topic[128], *pl = malloc(680);
+    char topic[128], *pl = malloc(768);
     if (!pl) return;
     snprintf(topic, sizeof(topic), "homeassistant/cover/openprofalux_%s_%s/config", s_device, v->id);
-    snprintf(pl, 680,
+    snprintf(pl, 768,
         "{\"name\":\"%s\",\"uniq_id\":\"opfx_%s_%s\",\"dev_cla\":\"shutter\","
         "\"cmd_t\":\"openprofalux/cover/%s/set\","
         "\"pl_open\":\"OPEN\",\"pl_cls\":\"CLOSE\",\"pl_stop\":\"STOP\","
@@ -245,7 +245,8 @@ static void announce_one(volet_t *v) {
         "\"pos_open\":100,\"pos_clsd\":0,"
         "\"stat_t\":\"openprofalux/cover/%s/state\","
         "\"dev\":{\"ids\":[\"openprofalux_%s\"],\"name\":\"OpenProfalux %s\","
-        "\"mf\":\"OpenProfalux\",\"mdl\":\"ESP32+CC1101\"}}",
+        "\"mf\":\"isno.fr\",\"mdl\":\"ESP32+CC1101\","
+        "\"cu\":\"https://www.isno.fr/projets/openprofalux\"}}",
         v->id, s_device, v->id, v->id, v->id, v->id, v->id, s_device, s_device);
     mqtt_pub_raw(topic, pl, 1, 1);
     free(pl);

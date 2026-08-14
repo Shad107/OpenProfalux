@@ -289,6 +289,27 @@ static esp_err_t h_ota_rollback(httpd_req_t *r) {
     return ESP_OK;
 }
 
+/* ── /api/ota/pull : telecharge + flashe une image depuis une URL HTTPS (release GitHub) ── */
+static void ota_pull_bg_task(void *arg) {
+    char *url = (char *)arg;
+    esp_err_t err = ota_pull_from_url(url);
+    if (err != ESP_OK) ESP_LOGE(TAG, "ota_pull_from_url(%s) KO: %s", url, esp_err_to_name(err));
+    free(url);
+    vTaskDelete(NULL);
+}
+static esp_err_t h_ota_pull(httpd_req_t *r) {
+    char *body = read_body(r); if (!body) return httpd_resp_send_err(r, 400, "body");
+    cJSON *j = cJSON_Parse(body); free(body);
+    const char *url = j ? cJSON_GetStringValue(cJSON_GetObjectItem(j, "url")) : NULL;
+    char *dup = (url && !strncmp(url, "https://", 8)) ? strdup(url) : NULL;   /* HTTPS uniquement */
+    if (j) cJSON_Delete(j);
+    httpd_resp_set_type(r, "application/json");
+    if (dup && xTaskCreate(ota_pull_bg_task, "ota_pull", 8192, dup, 5, NULL) == pdPASS)
+        return httpd_resp_sendstr(r, "{\"ok\":1}");
+    free(dup);
+    return httpd_resp_sendstr(r, "{\"ok\":0}");
+}
+
 static void reg(httpd_handle_t s, const char *uri, httpd_method_t m, esp_err_t (*h)(httpd_req_t *)) {
     httpd_uri_t u = { .uri = uri, .method = m, .handler = h };
     httpd_register_uri_handler(s, &u);
@@ -316,6 +337,7 @@ void web_ui_start(void) {
     reg(s, "/api/ota/status",   HTTP_GET,  h_ota_status);
     reg(s, "/api/ota/upload",   HTTP_POST, h_ota_upload);
     reg(s, "/api/ota/rollback", HTTP_POST, h_ota_rollback);
+    reg(s, "/api/ota/pull",     HTTP_POST, h_ota_pull);
     reg(s, "/api/backup",       HTTP_GET,  h_backup);
     reg(s, "/api/restore",      HTTP_POST, h_restore);
     reg(s, "/api/mqtt/discover", HTTP_GET, h_mqtt_discover);
