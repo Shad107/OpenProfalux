@@ -10,6 +10,8 @@
 #include "esp_log.h"
 #include "esp_http_server.h"
 #include "esp_wifi.h"
+#include "esp_netif.h"
+#include "mdns.h"
 #include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -224,6 +226,28 @@ static esp_err_t h_restore(httpd_req_t *r) {
     return ESP_OK;
 }
 
+/* ── /api/mqtt/discover : cherche un broker MQTT en mDNS (_mqtt._tcp) ── */
+static esp_err_t h_mqtt_discover(httpd_req_t *r) {
+    mdns_result_t *res = NULL;
+    char out[128] = "{}";
+    bool found = false;
+    if (mdns_query_ptr("_mqtt", "_tcp", 3000, 5, &res) == ESP_OK) {
+        for (mdns_result_t *cur = res; cur && !found; cur = cur->next) {
+            for (mdns_ip_addr_t *a = cur->addr; a && !found; a = a->next) {
+                if (a->addr.type == ESP_IPADDR_TYPE_V4) {
+                    char ip[16]; esp_ip4addr_ntoa(&a->addr.u_addr.ip4, ip, sizeof(ip));
+                    snprintf(out, sizeof(out), "{\"uri\":\"mqtt://%s:%u\"}", ip, cur->port);
+                    found = true;
+                }
+            }
+        }
+    }
+    if (res) mdns_query_results_free(res);
+    httpd_resp_set_type(r, "application/json");
+    httpd_resp_sendstr(r, out);
+    return ESP_OK;
+}
+
 /* ── /api/ota/status + /api/ota/upload ── */
 static esp_err_t h_ota_status(httpd_req_t *r) {
     ota_status_t st; ota_get_status(&st);
@@ -271,7 +295,7 @@ static void reg(httpd_handle_t s, const char *uri, httpd_method_t m, esp_err_t (
 
 void web_ui_start(void) {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.max_uri_handlers = 18;
+    cfg.max_uri_handlers = 22;
     cfg.stack_size = 6144;   /* esp_ota_end() consomme la pile en fin d'upload */
     cfg.uri_match_fn = httpd_uri_match_wildcard;
     httpd_handle_t s = NULL;
@@ -293,5 +317,6 @@ void web_ui_start(void) {
     reg(s, "/api/ota/rollback", HTTP_POST, h_ota_rollback);
     reg(s, "/api/backup",       HTTP_GET,  h_backup);
     reg(s, "/api/restore",      HTTP_POST, h_restore);
+    reg(s, "/api/mqtt/discover", HTTP_GET, h_mqtt_discover);
     ESP_LOGI(TAG, "HTTP UI demarree");
 }

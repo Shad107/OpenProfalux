@@ -26,6 +26,8 @@
 #include "web_ui.h"
 #include "ota.h"
 #include <esp_timer.h>
+#include <esp_mac.h>
+#include "mdns.h"
 
 static const char *TAG = "main";
 static bool s_log_frames = false;   /* option UI "capture toutes les trames" (namespace cfg) */
@@ -156,11 +158,18 @@ void app_main(void) {
         while (!wifi_bridge_is_connected() && retry++ < 60) vTaskDelay(pdMS_TO_TICKS(500));
     }
     if (!wifi_bridge_is_connected()) {
-        ESP_LOGW(TAG, "Wi-Fi not connected. Starting SoftAP for config.");
-        wifi_bridge_start_softap("OpenProfalux-Setup", "openprofalux");
+        uint8_t mac[6] = {0}; esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
+        char ap_ssid[32]; snprintf(ap_ssid, sizeof(ap_ssid), "OpenProfalux_%02X%02X", mac[4], mac[5]);
+        ESP_LOGW(TAG, "Wi-Fi not connected. Starting SoftAP '%s' for config.", ap_ssid);
+        wifi_bridge_start_softap(ap_ssid, "openprofalux");
     }
 
-    /* 5b. UI web embarquee (config Wi-Fi/MQTT, apprentissage, OTA...) */
+    /* 5b. mDNS (pour l'auto-decouverte du broker MQTT depuis l'UI) */
+    if (wifi_bridge_is_connected()) {
+        if (mdns_init() == ESP_OK) { mdns_hostname_set("openprofalux"); mdns_instance_name_set("OpenProfalux"); }
+    }
+
+    /* 5c. UI web embarquee (config Wi-Fi/MQTT, apprentissage, OTA...) */
     web_ui_start();
 
     /* 6. MQTT */

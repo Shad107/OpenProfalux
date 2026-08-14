@@ -112,6 +112,14 @@ async function loadConfig() {
   $('#ota-version').textContent = st.version || '—';
 }
 $$('.tab').forEach(t => { if (t.dataset.tab === 'system') t.addEventListener('click', loadConfig); });
+$('#mqtt-detect').onclick = async () => {
+  const b = $('#mqtt-detect'); b.textContent = 'Recherche…'; b.disabled = true;
+  const r = await api('/api/mqtt/discover').catch(() => ({}));
+  if (r.uri) { $('#cfg-mqtt').value = r.uri; b.textContent = 'Trouvé : ' + r.uri; }
+  else b.textContent = 'Aucun broker trouvé';
+  b.disabled = false;
+  setTimeout(() => b.textContent = '🔍 Détecter le broker (mDNS)', 2500);
+};
 $('#cfg-save').onclick = async () => {
   const b = { device: $('#cfg-device').value, wifi_ssid: $('#cfg-ssid').value,
               mqtt_uri: $('#cfg-mqtt').value, mqtt_user: $('#cfg-muser').value,
