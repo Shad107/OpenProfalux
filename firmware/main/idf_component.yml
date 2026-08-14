@@ -1,0 +1,4 @@
+## Dépendances gérées (ESP-IDF Component Manager)
+dependencies:
+  idf: ">=5.2"
+  espressif/mdns: "^1.2.0"
