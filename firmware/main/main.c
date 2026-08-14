@@ -160,8 +160,8 @@ void app_main(void) {
     if (!wifi_bridge_is_connected()) {
         uint8_t mac[6] = {0}; esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
         char ap_ssid[32]; snprintf(ap_ssid, sizeof(ap_ssid), "OpenProfalux_%02X%02X", mac[4], mac[5]);
-        ESP_LOGW(TAG, "Wi-Fi not connected. Starting SoftAP '%s' for config.", ap_ssid);
-        wifi_bridge_start_softap(ap_ssid, "openprofalux");
+        ESP_LOGW(TAG, "Wi-Fi not connected. Starting SoftAP '%s' (open) for config.", ap_ssid);
+        wifi_bridge_start_softap(ap_ssid, "");   /* mdp vide => WIFI_AUTH_OPEN (comme OpenXtraflamme) */
     }
 
     /* 5b. mDNS (pour l'auto-decouverte du broker MQTT depuis l'UI) */
