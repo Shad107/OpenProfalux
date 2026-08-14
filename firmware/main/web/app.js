@@ -47,7 +47,11 @@ function renderVolets(list, rf) {
       <div class="serials">serials : ${(v.serials || []).map(s => `<code>${esc(remoteName(s))}</code>`).join(' ') || 'aucun'}
         ${r != null ? `<span style="margin-left:6px">· reçu ${sig(r)}</span>` : ''}</div>`;
     el.querySelectorAll('[data-cmd]').forEach(b =>
-      b.onclick = () => api('/api/shutter', { method: 'POST', body: JSON.stringify({ id: v.id, cmd: b.dataset.cmd }) }));
+      b.onclick = async () => {
+        const r = await api('/api/shutter', { method: 'POST', body: JSON.stringify({ id: v.id, cmd: b.dataset.cmd }) }).catch(() => null);
+        const m = r && r.tx_marc;
+        if (m != null && m >= 0 && m !== 0x13) toast(`${b.dataset.cmd} : TX MARCSTATE=0x${m.toString(16).toUpperCase()} (attendu 0x13, émission KO ?)`);
+      });
     el.querySelector('.slat').onclick = e => {
       const p = Math.round(100 * (e.offsetX / e.currentTarget.offsetWidth));
       api('/api/shutter', { method: 'POST', body: JSON.stringify({ id: v.id, cmd: 'pos', value: p }) });
@@ -93,16 +97,26 @@ function renderLearnSlots() {
   const cmd = (v && v.cmd) || {};
   box.innerHTML = '';
   for (const A of LEARN_ACTIONS) {
-    const learned = cmd[A.a] != null;
+    const c = cmd[A.a];
+    const learned = c != null;
     const row = document.createElement('div');
     row.className = 'slot' + (learned ? ' done' : '');
     row.innerHTML = `<span class="slot-ico">${A.ico}</span><span class="slot-lbl">${A.lbl}</span>
-      <span class="slot-state">${learned ? `✓ appris <code>0x${cmd[A.a].toString(16).toUpperCase()}</code>` : 'à capturer'}</span>
+      <span class="slot-state">${learned ? `✓ appris <code>0x${(c.b).toString(16).toUpperCase()}</code> <code>${esc(c.s)}</code>` : 'à capturer'}</span>
       <button class="btn slot-btn" data-a="${A.a}">${learned ? 'Recapturer' : 'Capturer'}</button>`;
     box.appendChild(row);
   }
   const enabled = !!id && !learning;
   box.querySelectorAll('.slot-btn').forEach(b => { b.disabled = !enabled; b.onclick = () => captureAction(b.dataset.a, b); });
+  const serialEl = $('#learn-serial');
+  if (serialEl) {
+    const sers = (v && v.serials) || [];
+    serialEl.innerHTML = sers.length > 1
+      ? `⚠ Commandes de plusieurs télécommandes : ${sers.map(s => `<code>${esc(s)}</code>`).join(' ')}`
+      : sers.length ? `Télécommande : <code>${esc(sers[0])}</code>` : '';
+  }
+  const delRow = $('#del-volet-row');
+  if (delRow) delRow.hidden = !v;
   const hint = $('#learn-hint');
   if (hint) hint.textContent = id
     ? `Volet « ${id} » : clique Capturer, puis appuie une fois sur le bouton de ta télécommande (< 1 m du boîtier).`
@@ -167,6 +181,18 @@ async function captureAction(action, btn) {
 
 const newVoletInput = $('#new-volet');
 if (newVoletInput) newVoletInput.oninput = () => { activeVolet = newVoletInput.value.trim(); renderLearnSlots(); };
+
+const delVoletBtn = $('#del-volet');
+if (delVoletBtn) delVoletBtn.onclick = async () => {
+  const id = activeVolet;
+  if (!id) return;
+  if (!confirm(`Supprimer le volet « ${id} » et toutes ses commandes apprises ?`)) return;
+  await api('/api/volet/delete', { method: 'POST', body: JSON.stringify({ id }) });
+  activeVolet = '';
+  const nr = $('#new-volet-row'); if (nr) { nr.hidden = true; $('#new-volet').value = ''; }
+  toast('Volet supprimé');
+  await loadStatus();
+};
 
 /* ── Télécommandes ── */
 function renderRemotes(map, rf) {

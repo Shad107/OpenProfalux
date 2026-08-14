@@ -19,6 +19,7 @@
 #include <driver/rmt_rx.h>
 
 static const char *TAG = "cc1101";
+int g_tx_marc = -1;   /* MARCSTATE lu juste apres le dernier STX (0x13=TX). Diagnostic expose via HTTP. */
 static spi_device_handle_t s_spi = NULL;
 static rmt_channel_handle_t s_cap = NULL;
 static QueueHandle_t s_capq = NULL;
@@ -237,9 +238,17 @@ int cc1101_tx_ook_frame(const uint8_t *frame, size_t bits) {
 /* Rejoue une trame brute (chaine de bits '0'/'1' en ordre du fil) en OOK :
  * preambule + entete + symboles HCS30x. Sert au replay d'une trame captee. */
 int cc1101_tx_raw_bits(const char *bits, int n) {
+    /* Reconfiguration RX -> TX : apres l'ecoute permanente le CC1101 est en config RX
+     * (IOCFG0 demod, AGC, etat variable). On quitte proprement (SIDLE), on restaure
+     * IOCFG0 pour le TX async, on recalibre le synthe (SCAL) puis on entre en TX. */
     gpio_set_direction(CC1101_PIN_GDO0, GPIO_MODE_INPUT_OUTPUT);
+    strobe(CC_SIDLE); esp_rom_delay_us(150);
+    strobe(0x33);                        /* SCAL : recalibration du synthe (l'ecoute permanente a pu laisser un etat RX) */
+    esp_rom_delay_us(800);
     strobe(CC_STX);
     esp_rom_delay_us(800);
+    g_tx_marc = cc1101_read_reg(CC_MARCSTATE | 0x40) & 0x1F;
+    ESP_LOGW(TAG, "TX: MARCSTATE=0x%02X (0x13=TX attendu), %d bits", g_tx_marc, n);
     for (int i = 0; i < PROFALUX_PREAMBLE_ELEMENTS; i++) {
         gpio_set_level(CC1101_PIN_GDO0, (i & 1) == 0);
         esp_rom_delay_us(PROFALUX_TE_US);
@@ -282,13 +291,20 @@ int cc1101_capture_init(void) {
  * Retourne le nombre de bits decodes (<0 = erreur). bit=1 si HAUT court (H<680us). */
 /* Decode une capture RMT (forme d'onde OOK HCS30x) en bits. Retourne nbits. */
 static int decode_rmt(const rmt_symbol_word_t *sym, size_t n, char *out, int max_bits) {
-    int hdr = -1;
+    int hdr = -1, hdr_in_dur0 = 0;
     for (size_t i = 0; i < n; i++) {
-        if (!sym[i].level0 && sym[i].duration0 > 3500) { hdr = (int)i; break; }
-        if (!sym[i].level1 && sym[i].duration1 > 3500) { hdr = (int)i; break; }
+        if (!sym[i].level0 && sym[i].duration0 > 3500) { hdr = (int)i; hdr_in_dur0 = 1; break; }
+        if (!sym[i].level1 && sym[i].duration1 > 3500) { hdr = (int)i; hdr_in_dur0 = 0; break; }
     }
     if (hdr < 0) return -4;
     int nb = 0;
+    /* Correctif off-by-one : si l'entete (LOW long) est dans duration0, alors le HIGH
+     * du PREMIER bit de data est deja dans duration1 du MEME symbole. L'ancien code
+     * demarrait a hdr+1 et perdait ce bit -> trame decalee (serial = attendu>>1) et
+     * rejeu invalide. On l'emet ici avant de continuer. */
+    if (hdr_in_dur0 && sym[hdr].level1 && sym[hdr].duration1 >= 200 && sym[hdr].duration1 <= 1300) {
+        out[nb++] = (sym[hdr].duration1 < 680) ? '1' : '0';
+    }
     for (size_t i = hdr + 1; i < n && nb < max_bits && nb < 66; i++) {
         uint32_t hi = sym[i].level0 ? sym[i].duration0 : sym[i].duration1;
         uint32_t lo = sym[i].level0 ? sym[i].duration1 : sym[i].duration0;
@@ -323,7 +339,9 @@ int cc1101_rx_listen_bits(uint32_t timeout_ms, char *out_bits, int max_bits) {
     cc1101_write_reg(0x02, 0x0D);   /* IOCFG0 = donnee serie demodulee sur GDO0 */
     cc1101_write_reg(0x0B, 0x06);   /* FSCTRL1 */
     cc1101_write_reg(0x19, 0x14);   /* FOCCFG  */
-    cc1101_write_reg(0x1B, 0x07);   /* AGCCTRL2 gain max */
+    cc1101_write_reg(0x1B, 0x27);   /* AGCCTRL2 : plafonne le gain LNA (-9 dB) pour mordre le bruit OOK sans
+                                       rendre sourd. 0x07=gain max (bruit permanent, buffer RMT sature) ;
+                                       0x3F=-17dB (trop, telecommande inaudible). 0x27 = compromis a valider. */
     cc1101_write_reg(0x1C, 0x00);   /* AGCCTRL1 */
     cc1101_write_reg(0x1D, 0x91);   /* AGCCTRL0 */
     strobe(CC_SIDLE); esp_rom_delay_us(200);

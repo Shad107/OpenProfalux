@@ -20,6 +20,7 @@ void shutters_init(void);
 
 /* Commande : cmd = "up" | "down" | "stop" | "pos" (value = 0..100). Rejoue la trame + suit la position. */
 int  shutters_cmd(const char *id, const char *cmd, int value);
+int  shutters_delete_volet(const char *id);
 
 /* Apprentissage : affecte une trame captee (bitstring) a une action d'un volet. Cree le volet si absent. */
 int  shutters_learn_assign(const char *id, const char *action, const char *bits);

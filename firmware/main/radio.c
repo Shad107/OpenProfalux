@@ -30,6 +30,9 @@ void radio_init(void) {
     if (!s_mtx) s_mtx = xSemaphoreCreateMutex();
     /* Coupe le spam "RX(GDO0): MARCSTATE=..." emis a chaque fenetre d'ecoute. */
     esp_log_level_set("cc1101", ESP_LOG_WARN);
+    /* Coupe le spam "hw buffer too small" : le bruit OOK sature normalement le buffer
+     * RMT de l'ecoute permanente ; c'est attendu et sans consequence (on se re-arme). */
+    esp_log_level_set("rmt", ESP_LOG_NONE);
 }
 
 void radio_tx(const char *bits) {

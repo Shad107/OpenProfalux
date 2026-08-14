@@ -254,10 +254,27 @@ static void announce_one(volet_t *v) {
 }
 
 /* ── API commande ── */
+int shutters_delete_volet(const char *id) {
+    if (!id || !*id) return -1;
+    LOCK();
+    int idx = -1;
+    for (int i = 0; i < s_nvolets; i++) if (!strcmp(s_volets[i].id, id)) { idx = i; break; }
+    if (idx < 0) { UNLOCK(); return -1; }
+    for (int i = idx; i < s_nvolets - 1; i++) s_volets[i] = s_volets[i + 1];
+    s_nvolets--;
+    save_cfg();
+    update_listening();   /* plus aucun volet -> coupe l'ecoute permanente */
+    UNLOCK();
+    ESP_LOGW(TAG, "volet '%s' supprime", id);
+    return 0;
+}
+
 int shutters_cmd(const char *id, const char *cmd, int value) {
     LOCK();
     volet_t *v = find_volet(id);
-    if (!v) { UNLOCK(); return -1; }
+    if (!v) { ESP_LOGW(TAG, "CMD '%s' : volet '%s' introuvable", cmd, id ? id : "(null)"); UNLOCK(); return -1; }
+    ESP_LOGW(TAG, "CMD %s '%s' (up=%dc stop=%dc down=%dc)", cmd, id,
+             (int)strlen(v->up), (int)strlen(v->stop), (int)strlen(v->down));
     if (!strcmp(cmd, "up"))        { v->target = 100; start_move(v, +1); }
     else if (!strcmp(cmd, "down")) { v->target = 0;   start_move(v, -1); }
     else if (!strcmp(cmd, "stop")) { do_stop(v); }
@@ -381,6 +398,16 @@ static void dataset_log_frame(const char *shex, uint8_t button, uint32_t hop, in
     mqtt_pub_raw(topic, pl, 0, 1);   /* le broker/HA accumule le total reel (dataset slide) */
 }
 
+/* Rattrapage : rejoue le ring RF recent (12 dernieres trames) vers le dataset MQTT,
+ * du plus ancien au plus recent. Appele sous LOCK, no-op si option off ou MQTT absent. */
+static void flush_frame_ring_locked(void) {
+    if (!s_log_frames || !s_mqtt_ready) return;
+    for (int k = 0; k < 12; k++) {
+        rfrec_t *r = &s_rf[(s_rfhead + k) % 12];
+        if (r->serial[0]) dataset_log_frame(r->serial, r->button, r->hop, r->rssi);
+    }
+}
+
 /* ══ FONCTION 2 — Suivi de position via telecommandes ENREGISTREES ══
  * Independante de l'option MQTT : des qu'un volet a appris ce serial+bouton, on suit
  * sa position quand la VRAIE telecommande l'actionne. Appele sous LOCK. */
@@ -406,6 +433,8 @@ static void track_shutter_position(const char *shex, uint8_t button) {
 
 /* ── RX : chaque trame recue -> journal + les 2 fonctions ci-dessus ── */
 void shutters_on_rx(uint32_t serial, uint8_t button, int8_t rssi, uint32_t hop) {
+    ESP_LOGI(TAG, "RX serial=0x%07X bouton=0x%X hop=0x%08X rssi=%d dBm",
+             (unsigned)serial, button, (unsigned)hop, rssi);
     LOCK();
     /* journal RF pour le monitor UI */
     rfrec_t *r = &s_rf[s_rfhead];
@@ -421,6 +450,20 @@ void shutters_on_rx(uint32_t serial, uint8_t button, int8_t rssi, uint32_t hop) 
     if (s_log_frames && s_mqtt_ready) dataset_log_frame(shex, button, hop, rssi);  /* fonction 1 (option MQTT) */
     track_shutter_position(shex, button);                                          /* fonction 2 (toujours) */
     UNLOCK();
+}
+
+/* Ajoute au JSON une commande apprise : { "b": <bouton>, "s": "0x<serial>" }.
+ * Le serial est extrait de la trame stockee (bits[32..59], LSB), pour verifier
+ * dans l'UI que les 3 commandes viennent bien de la meme telecommande. */
+static void add_cmd_json(cJSON *cmd, const char *key, const char *bits, uint8_t btn) {
+    if (!bits[0]) return;
+    uint32_t ser = 0;
+    if ((int)strlen(bits) >= 60) for (int i = 0; i < 28; i++) if (bits[32 + i] == '1') ser |= (1u << i);
+    char sx[12]; snprintf(sx, sizeof(sx), "0x%07X", (unsigned)ser);
+    cJSON *c = cJSON_CreateObject();
+    cJSON_AddNumberToObject(c, "b", btn);
+    cJSON_AddStringToObject(c, "s", sx);
+    cJSON_AddItemToObject(cmd, key, c);
 }
 
 /* ── Status JSON ── */
@@ -440,9 +483,9 @@ int shutters_status_json(char *buf, int cap) {
         /* etat des 3 commandes : bouton appris (nibble) si le slot est rempli, absent sinon.
          * Permet a l'UI d'apprentissage centree-volet d'afficher appris / a capturer. */
         cJSON *cmd = cJSON_AddObjectToObject(o, "cmd");
-        if (v->up[0])   cJSON_AddNumberToObject(cmd, "up",   v->up_btn);
-        if (v->stop[0]) cJSON_AddNumberToObject(cmd, "stop", v->stop_btn);
-        if (v->down[0]) cJSON_AddNumberToObject(cmd, "down", v->down_btn);
+        add_cmd_json(cmd, "up",   v->up,   v->up_btn);
+        add_cmd_json(cmd, "stop", v->stop, v->stop_btn);
+        add_cmd_json(cmd, "down", v->down, v->down_btn);
         cJSON_AddItemToArray(vols, o);
     }
     cJSON *rf = cJSON_AddArrayToObject(root, "rf");
@@ -515,6 +558,7 @@ void shutters_mqtt_announce(const char *device) {
     strlcpy(s_device, (device && *device) ? device : "op", sizeof(s_device));
     s_mqtt_ready = true;
     for (int i = 0; i < s_nvolets; i++) announce_one(&s_volets[i]);
+    flush_frame_ring_locked();   /* rattrapage : envoie les dernieres trames du ring des la connexion */
     UNLOCK();
     ESP_LOGI(TAG, "HA discovery publiee pour %d cover(s), device=%s", s_nvolets, s_device);
 }
@@ -543,12 +587,17 @@ void shutters_mqtt_on_message(const char *topic, const char *data, int len) {
  *  - collecter le dataset slide                      -> si l'option "capture" est ON.
  * On ecoute donc si l'une OU l'autre est vraie. */
 static void update_listening(void) {
-    radio_set_listening(s_log_frames || s_nvolets > 0);
+    /* Ecoute permanente = uniquement si l'option est activee. Evite la saturation
+     * (boucle RMT sur le bruit OOK) en usage normal. L'apprentissage et le rejeu
+     * n'en dependent pas ; seuls le RF debug live, le suivi de position via la vraie
+     * telecommande et le dataset MQTT necessitent cette ecoute. */
+    radio_set_listening(s_log_frames);
 }
 
 void shutters_set_log_frames(bool on) {
     s_log_frames = on;
     update_listening();
+    if (on) { LOCK(); flush_frame_ring_locked(); UNLOCK(); }   /* si MQTT deja connecte : rattrape le ring tout de suite */
     ESP_LOGI(TAG, "log_frames=%d", on);
 }
 

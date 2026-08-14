@@ -56,6 +56,8 @@
             <div class="row" style="flex-wrap:nowrap"><input id="cap-name" placeholder="ex : Murale chambre parents" style="flex:1;min-width:0">
             <button id="rename-btn" class="btn" hidden>Renommer</button></div></div>
           <div id="learn-slots" class="slots"></div>
+          <p class="hint" id="learn-serial"></p>
+          <div class="row" id="del-volet-row" hidden><button id="del-volet" class="btn danger">🗑 Supprimer ce volet</button></div>
           <p class="hint" id="learn-hint">Choisis un volet ci-dessus pour activer la capture. Place-toi à moins d'un mètre du boîtier et appuie une fois sur le bon bouton.</p>
         </div>
       </div>
@@ -134,7 +136,7 @@
           <h2>Appareil</h2>
           <div class="field" style="margin-top:12px"><label>Nom de l'appareil</label><input id="sys-device" placeholder="openprofalux"></div>
           <label class="switch"><input type="checkbox" id="sys-logframes"><span class="track"></span>
-            <span class="lbl">Journaliser toutes les trames en MQTT<small>Écoute RF permanente · redémarrage requis</small></span></label>
+            <span class="lbl">Écoute RF permanente<small>Active le RF debug en direct, le suivi de position via la vraie télécommande et le dataset MQTT. Désactivée = radio libre (moins de bruit).</small></span></label>
           <label class="switch"><input type="checkbox" id="sys-reboot"><span class="track"></span>
             <span class="lbl">Redémarrer après enregistrement</span></label>
           <div class="row end"><button id="sys-save" class="btn primary">Enregistrer</button></div>
