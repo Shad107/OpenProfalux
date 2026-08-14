@@ -8,14 +8,14 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '
 $$('.tab').forEach(t => t.onclick = () => {
   $$('.tab').forEach(x => x.classList.toggle('active', x === t));
   $$('.panel').forEach(p => p.classList.toggle('active', p.dataset.p === t.dataset.t));
-  if (t.dataset.t === 'sys') loadConfig();
+  if (['sys', 'mqtt', 'ota'].includes(t.dataset.t)) loadConfig();
 });
 /* Sous-onglets (generique, scope au panneau parent) */
 $$('.subtab').forEach(t => t.onclick = () => {
   const sec = t.closest('.panel');
   $$('.subtab', sec).forEach(x => x.classList.toggle('active', x === t));
   $$('.subpanel', sec).forEach(p => p.classList.toggle('active', p.dataset.sp === t.dataset.s));
-  if (['wifi', 'mqtt', 'ota'].includes(t.dataset.s)) loadConfig();
+  if (t.dataset.s === 'wifi') loadConfig();
 });
 $('#theme').onclick = () => {
   const r = document.documentElement;
