@@ -1,0 +1,32 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "keeloq.c"
+        "pfx_keys.c"
+        "profalux.c"
+        "cc1101.c"
+        "wifi_bridge.c"
+        "mqtt_bridge.c"
+        "shutters.c"
+        "web_ui.c"
+        "ota.c"
+        "radio.c"
+    INCLUDE_DIRS "."
+    EMBED_FILES
+        "web/index.html"
+        "web/style.css"
+        "web/app.js"
+    REQUIRES
+        nvs_flash
+        esp_wifi
+        esp_netif
+        esp_event
+        mqtt
+        json
+        driver
+        esp_http_server
+        app_update
+        esp_https_ota
+        esp_http_client
+        esp-tls
+)

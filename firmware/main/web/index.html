@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="fr" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#2563eb">
+<title>OpenProfalux</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="app-header">
+  <div class="brand"><div class="logo">OP</div>
+    <div><h1>OpenProfalux</h1><p class="tagline">Volets Profalux 868 · <span id="version">v0.1</span></p></div>
+  </div>
+  <button id="theme-btn" title="Thème">🌓</button>
+</header>
+
+<nav class="tabs">
+  <button class="tab active" data-tab="control">🪟 Volets</button>
+  <button class="tab" data-tab="learn">🎓 Apprentissage</button>
+  <button class="tab" data-tab="remotes">📱 Télécommandes</button>
+  <button class="tab" data-tab="calib">🎯 Calibration</button>
+  <button class="tab" data-tab="monitor">📻 RF</button>
+  <button class="tab" data-tab="system">⚙️ Système</button>
+</nav>
+
+<!-- ── Volets : contrôle + position ── -->
+<section class="panel active" id="control">
+  <div id="volets"></div>
+  <p class="hint" id="control-empty" hidden>Aucun volet. Va dans <b>Apprentissage</b> pour en capturer un.</p>
+</section>
+
+<!-- ── Apprentissage : capture d'une télécommande ── -->
+<section class="panel" id="learn">
+  <div class="card">
+    <h2>Capturer une télécommande</h2>
+    <ol class="steps">
+      <li>Choisis l'action à enregistrer, puis clique <b>Écouter</b>.</li>
+      <li>Appuie <b>une fois</b> sur le bouton correspondant de ta télécommande physique.</li>
+      <li>La trame captée s'affiche → <b>Affecter</b> au volet.</li>
+    </ol>
+    <label>Volet <input id="learn-id" placeholder="ex: chambre"></label>
+    <div class="btn-row">
+      <button data-act="up"   class="act">▲ Montée</button>
+      <button data-act="stop" class="act">■ Stop</button>
+      <button data-act="down" class="act">▼ Descente</button>
+    </div>
+    <button id="listen-btn" class="primary" disabled>Écouter (choisis une action)</button>
+    <div id="learn-result" hidden>
+      <p>Trame captée : <code id="cap-info">—</code></p>
+      <label>Nom de cette télécommande <input id="cap-name" placeholder="ex: Murale chambre"></label>
+      <button id="assign-btn" class="primary">Affecter au volet</button>
+    </div>
+    <p class="hint">Astuce : la même télécommande peut avoir plusieurs serials (Noé multi-canal) — capture chaque canal.</p>
+  </div>
+</section>
+
+<!-- ── Télécommandes : nommer les serials détectés ── -->
+<section class="panel" id="remotes">
+  <div class="card">
+    <h2>Télécommandes détectées</h2>
+    <p class="hint">Donne un nom lisible à chaque serial vu sur l'air.</p>
+    <div id="remotes-list"></div>
+    <p class="hint" id="remotes-empty" hidden>Aucune télécommande vue. Capture-en une dans <b>Apprentissage</b>.</p>
+  </div>
+</section>
+
+<!-- ── Calibration position ── -->
+<section class="panel" id="calib">
+  <div class="card">
+    <h2>Calibrer la position</h2>
+    <p>Mesure le temps de course complète pour estimer le %. Le moteur ne renvoie pas sa position.</p>
+    <label>Volet <input id="calib-id" placeholder="ex: chambre"></label>
+    <ol class="steps">
+      <li>Volet en <b>butée haute</b> (0%). Clique <b>Démarrer descente</b> puis <b>Arrivé en bas</b> à la butée basse.</li>
+      <li>Idem pour la montée.</li>
+    </ol>
+    <div class="btn-row">
+      <button id="cal-down-start">▼ Démarrer descente</button>
+      <button id="cal-down-stop" disabled>Arrivé en bas ⏱ <span id="cal-down-t">0.0s</span></button>
+    </div>
+    <div class="btn-row">
+      <button id="cal-up-start">▲ Démarrer montée</button>
+      <button id="cal-up-stop" disabled>Arrivé en haut ⏱ <span id="cal-up-t">0.0s</span></button>
+    </div>
+    <button id="cal-save" class="primary" disabled>Enregistrer la calibration</button>
+  </div>
+</section>
+
+<!-- ── Monitor RF ── -->
+<section class="panel" id="monitor">
+  <div class="card">
+    <h2>Trames en direct</h2>
+    <p class="hint">Chaque commande RF captée (télécommandes + nos rejeux).</p>
+    <table id="rf-table"><thead><tr><th>t</th><th>serial</th><th>bouton</th><th>hop</th><th>rssi</th></tr></thead><tbody></tbody></table>
+  </div>
+</section>
+
+<!-- ── Système : Wi-Fi, MQTT, OTA ── -->
+<section class="panel" id="system">
+  <div class="card">
+    <h2>Configuration</h2>
+    <label>Nom de l'appareil <input id="cfg-device" placeholder="openprofalux"></label>
+    <h3>Wi-Fi</h3>
+    <label>SSID <input id="cfg-ssid"></label>
+    <label>Mot de passe <input id="cfg-wpass" type="password" placeholder="(inchangé)"></label>
+    <h3>MQTT</h3>
+    <label>Broker URI <input id="cfg-mqtt" placeholder="mqtt://192.168.1.10"></label>
+    <label>Utilisateur <input id="cfg-muser"></label>
+    <label>Mot de passe <input id="cfg-mpass" type="password" placeholder="(inchangé)"></label>
+    <label><input type="checkbox" id="cfg-logframes"> Enregistrer <b>toutes</b> les trames en MQTT (écoute RF permanente)</label>
+    <p class="hint">Publie chaque trame captée sur <code>openprofalux/frames/&lt;serial&gt;</code> (dédupliquée). Nécessite un redémarrage pour activer l'écoute permanente.</p>
+    <label><input type="checkbox" id="cfg-reboot"> Redémarrer après enregistrement</label>
+    <button id="cfg-save" class="primary">Enregistrer</button>
+  </div>
+  <div class="card">
+    <h2>Mise à jour (OTA)</h2>
+    <p>Version : <code id="ota-version">—</code></p>
+    <input type="file" id="ota-file" accept=".bin">
+    <button id="ota-btn" class="primary">Flasher le firmware</button>
+    <div id="ota-prog" hidden><progress id="ota-bar" max="100" value="0"></progress> <span id="ota-msg"></span></div>
+    <p class="hint">Le firmware s'écrit sur la partition inactive ; rollback auto si le boot échoue.</p>
+    <button id="ota-rollback" class="btn-row" style="width:100%;margin-top:8px">↩ Revenir à la version précédente</button>
+  </div>
+  <div class="card">
+    <h2>Sauvegarde</h2>
+    <p class="hint">Télécommandes (noms + trames de référence) et calibration. À conserver hors de l'ESP32 : permet de tout restaurer après un reset ou sur un module de rechange.</p>
+    <a id="backup-dl" class="primary" style="display:block;text-align:center;text-decoration:none" href="/api/backup" download="openprofalux-backup.json">⬇ Télécharger la sauvegarde</a>
+    <h3>Restaurer</h3>
+    <input type="file" id="restore-file" accept=".json,application/json">
+    <button id="restore-btn" class="primary">Restaurer (remplace la config actuelle)</button>
+  </div>
+</section>
+
+<script src="/app.js"></script>
+</body>
+</html>
