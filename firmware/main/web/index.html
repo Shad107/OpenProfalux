@@ -26,7 +26,10 @@
     <button class="tab active" data-t="control"><span>🪟</span>Volets</button>
     <button class="tab" data-t="remotes"><span>📱</span>Télécommandes</button>
     <button class="tab" data-t="rf"><span>📻</span>RF</button>
+    <button class="tab" data-t="mqtt"><span>📡</span>MQTT</button>
+    <button class="tab" data-t="ota"><span>⬆️</span>OTA</button>
     <button class="tab" data-t="sys"><span>⚙️</span>Système</button>
+    <button class="tab" data-t="about"><span>ℹ️</span>À propos</button>
   </nav>
 
   <main>
@@ -104,15 +107,43 @@
       </div>
     </section>
 
+    <!-- MQTT -->
+    <section class="panel" data-p="mqtt">
+      <div class="card">
+        <h2>MQTT</h2>
+        <p class="sub">Pont vers Home Assistant. Le boîtier publie l'état des volets et reçoit les commandes.</p>
+        <div class="statline" id="mqtt-status"><span class="dot"></span><b>—</b></div>
+        <div class="field"><label>Broker</label><input id="mqtt-uri" placeholder="mqtt://192.168.1.10"></div>
+        <div class="row" style="margin:-4px 0 12px"><button class="btn ghost" id="mqtt-detect">🔍 Détecter le broker (mDNS)</button></div>
+        <div class="field"><label>Utilisateur</label><input id="mqtt-user" placeholder="(optionnel)"></div>
+        <div class="field"><label>Mot de passe</label><input id="mqtt-pass" type="password" placeholder="•••••••• (inchangé si vide)"></div>
+        <div class="row end"><button id="mqtt-save" class="btn primary">Enregistrer le MQTT</button></div>
+      </div>
+    </section>
+
+    <!-- OTA -->
+    <section class="panel" data-p="ota">
+      <div class="card">
+        <h2>Mise à jour (OTA)</h2>
+        <p class="sub">Version courante : <code id="ota-version">—</code></p>
+        <h3>Depuis GitHub</h3>
+        <div class="row"><button id="ota-check" class="btn">Vérifier la dernière version</button>
+          <button id="ota-github" class="btn primary" hidden>Installer depuis GitHub</button></div>
+        <p class="hint" id="ota-latest" style="margin:9px 0 0">Récupère la dernière release publiée sur GitHub.</p>
+        <h3>Depuis un fichier</h3>
+        <div class="field"><label>Fichier firmware (.bin)</label><input type="file" id="ota-file" accept=".bin"></div>
+        <div class="row"><button id="ota-btn" class="btn primary">Flasher</button><button id="ota-rollback" class="btn danger">↩ Version précédente</button></div>
+        <div id="ota-prog" hidden style="margin-top:12px"><progress id="ota-bar" max="100" value="0"></progress> <span class="hint" id="ota-msg"></span></div>
+        <p class="hint" style="margin-top:12px">Écrit sur la partition inactive ; rollback automatique si le démarrage échoue.</p>
+      </div>
+    </section>
+
     <!-- Système (sous-onglets) -->
     <section class="panel" data-p="sys">
       <nav class="subtabs">
         <button class="subtab active" data-s="wifi">Wi-Fi</button>
-        <button class="subtab" data-s="mqtt">MQTT</button>
         <button class="subtab" data-s="device">Appareil</button>
-        <button class="subtab" data-s="ota">OTA</button>
         <button class="subtab" data-s="backup">Sauvegarde</button>
-        <button class="subtab" data-s="about">À propos</button>
       </nav>
 
       <div class="subpanel active" data-sp="wifi">
@@ -128,19 +159,6 @@
         </div>
       </div>
 
-      <div class="subpanel" data-sp="mqtt">
-        <div class="card">
-          <h2>MQTT</h2>
-          <p class="sub">Pont vers Home Assistant. Le boîtier publie l'état des volets et reçoit les commandes.</p>
-          <div class="statline" id="mqtt-status"><span class="dot"></span><b>—</b></div>
-          <div class="field"><label>Broker</label><input id="mqtt-uri" placeholder="mqtt://192.168.1.10"></div>
-          <div class="row" style="margin:-4px 0 12px"><button class="btn ghost" id="mqtt-detect">🔍 Détecter le broker (mDNS)</button></div>
-          <div class="field"><label>Utilisateur</label><input id="mqtt-user" placeholder="(optionnel)"></div>
-          <div class="field"><label>Mot de passe</label><input id="mqtt-pass" type="password" placeholder="•••••••• (inchangé si vide)"></div>
-          <div class="row end"><button id="mqtt-save" class="btn primary">Enregistrer le MQTT</button></div>
-        </div>
-      </div>
-
       <div class="subpanel" data-sp="device">
         <div class="card">
           <h2>Appareil</h2>
@@ -150,22 +168,6 @@
           <label class="switch"><input type="checkbox" id="sys-reboot"><span class="track"></span>
             <span class="lbl">Redémarrer après enregistrement</span></label>
           <div class="row end"><button id="sys-save" class="btn primary">Enregistrer</button></div>
-        </div>
-      </div>
-
-      <div class="subpanel" data-sp="ota">
-        <div class="card">
-          <h2>Mise à jour (OTA)</h2>
-          <p class="sub">Version courante : <code id="ota-version">—</code></p>
-          <h3>Depuis GitHub</h3>
-          <div class="row"><button id="ota-check" class="btn">Vérifier la dernière version</button>
-            <button id="ota-github" class="btn primary" hidden>Installer depuis GitHub</button></div>
-          <p class="hint" id="ota-latest" style="margin:9px 0 0">Récupère la dernière release publiée sur GitHub.</p>
-          <h3>Depuis un fichier</h3>
-          <div class="field"><label>Fichier firmware (.bin)</label><input type="file" id="ota-file" accept=".bin"></div>
-          <div class="row"><button id="ota-btn" class="btn primary">Flasher</button><button id="ota-rollback" class="btn danger">↩ Version précédente</button></div>
-          <div id="ota-prog" hidden style="margin-top:12px"><progress id="ota-bar" max="100" value="0"></progress> <span class="hint" id="ota-msg"></span></div>
-          <p class="hint" style="margin-top:12px">Écrit sur la partition inactive ; rollback automatique si le démarrage échoue.</p>
         </div>
       </div>
 
@@ -180,17 +182,19 @@
         </div>
       </div>
 
-      <div class="subpanel" data-sp="about">
-        <div class="card">
-          <h2>À propos</h2>
-          <p class="sub">Pilotage local des volets Profalux 868 MHz par clonage de télécommande (capture + rejeu), sans clé constructeur.</p>
-          <ul class="links">
-            <li>🌐 <a href="https://www.isno.fr/projets/openprofalux" target="_blank" rel="noopener">Projet &amp; guide — isno.fr</a></li>
-            <li>💻 <a href="https://github.com/Shad107/OpenProfalux" target="_blank" rel="noopener">Code source — GitHub</a></li>
-            <li>⬆️ <a href="https://github.com/Shad107/OpenProfalux/releases" target="_blank" rel="noopener">Dernières versions (OTA)</a></li>
-          </ul>
-          <p class="hint">© 2026 <a href="https://www.isno.fr" target="_blank" rel="noopener">isno.fr</a> — Olivier (Shad107). Open-source.</p>
-        </div>
+    </section>
+
+    <!-- À propos -->
+    <section class="panel" data-p="about">
+      <div class="card">
+        <h2>À propos</h2>
+        <p class="sub">Pilotage local des volets Profalux 868 MHz par clonage de télécommande (capture + rejeu), sans clé constructeur.</p>
+        <ul class="links">
+          <li>🌐 <a href="https://www.isno.fr/projets/openprofalux" target="_blank" rel="noopener">Projet &amp; guide — isno.fr</a></li>
+          <li>💻 <a href="https://github.com/Shad107/OpenProfalux" target="_blank" rel="noopener">Code source — GitHub</a></li>
+          <li>⬆️ <a href="https://github.com/Shad107/OpenProfalux/releases" target="_blank" rel="noopener">Dernières versions (OTA)</a></li>
+        </ul>
+        <p class="hint">© 2026 <a href="https://www.isno.fr" target="_blank" rel="noopener">isno.fr</a> — Olivier (Shad107). Open-source.</p>
       </div>
     </section>
   </main>
