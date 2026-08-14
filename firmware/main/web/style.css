@@ -49,10 +49,9 @@ a{color:var(--accent)}
 .icon-btn{width:36px;height:36px;flex:none;display:grid;place-items:center;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:10px;cursor:pointer;font-size:1rem}
 .icon-btn:hover{border-color:var(--accent-line)}
 
-.tabs{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;padding:9px clamp(10px,4vw,22px);position:sticky;top:57px;z-index:15;background:var(--bg)}
-.tabs::-webkit-scrollbar{display:none}
-.tab{flex:none;display:inline-flex;align-items:center;gap:7px;padding:8px 13px;border-radius:999px;border:1px solid transparent;background:transparent;color:var(--muted);font:inherit;font-weight:550;font-size:.86rem;cursor:pointer;white-space:nowrap}
-.tab:hover{color:var(--text);background:var(--surface-2)}
+.tabs{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;padding:14px clamp(10px,4vw,22px) 4px}
+.tab{display:inline-flex;align-items:center;gap:7px;padding:8px 14px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--muted);font:inherit;font-weight:550;font-size:.86rem;cursor:pointer;white-space:nowrap;transition:.14s}
+.tab:hover{color:var(--text);border-color:var(--accent-line)}
 .tab.active{color:var(--accent-fg);background:var(--accent);border-color:var(--accent)}
 .subtabs{display:flex;gap:2px;margin-bottom:16px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:3px}
 .subtab{flex:1;padding:7px 10px;border:none;background:transparent;color:var(--muted);font:inherit;font-weight:600;font-size:.85rem;border-radius:7px;cursor:pointer}
