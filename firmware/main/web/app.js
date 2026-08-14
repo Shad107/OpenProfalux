@@ -4,18 +4,31 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const api = (u, o) => fetch(u, o).then(r => r.ok ? r.json().catch(() => ({})) : Promise.reject(r.status));
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-/* ── Onglets + thème ── */
-$$('.tab').forEach(t => t.onclick = () => {
+/* ── Onglets + routes (hash de l'URL, ex #sys/wifi) + thème ── */
+function activateMain(name) {
+  const t = $(`.tab[data-t="${name}"]`); if (!t) return false;
   $$('.tab').forEach(x => x.classList.toggle('active', x === t));
-  $$('.panel').forEach(p => p.classList.toggle('active', p.dataset.p === t.dataset.t));
-  if (['sys', 'wifi', 'mqtt', 'ota'].includes(t.dataset.t)) loadConfig();
-});
-/* Sous-onglets (generique, scope au panneau parent) */
+  $$('.panel').forEach(p => p.classList.toggle('active', p.dataset.p === name));
+  if (['sys', 'wifi', 'mqtt', 'ota'].includes(name)) loadConfig();
+  return true;
+}
+function activateSub(sec, name) {
+  const found = $$('.subtab', sec).some(x => x.dataset.s === name);
+  $$('.subtab', sec).forEach(x => x.classList.toggle('active', x.dataset.s === name));
+  $$('.subpanel', sec).forEach(p => p.classList.toggle('active', p.dataset.sp === name));
+  return found;
+}
+function applyRoute() {
+  const [main, sub] = (location.hash || '#control').replace(/^#/, '').split('/');
+  if (!activateMain(main)) { activateMain('control'); return; }
+  const sec = $(`.panel[data-p="${main}"]`);
+  if (sub && sec) activateSub(sec, sub);
+}
+$$('.tab').forEach(t => t.onclick = () => { location.hash = t.dataset.t; });
 $$('.subtab').forEach(t => t.onclick = () => {
-  const sec = t.closest('.panel');
-  $$('.subtab', sec).forEach(x => x.classList.toggle('active', x === t));
-  $$('.subpanel', sec).forEach(p => p.classList.toggle('active', p.dataset.sp === t.dataset.s));
+  location.hash = `${t.closest('.panel').dataset.p}/${t.dataset.s}`;
 });
+addEventListener('hashchange', applyRoute);
 $('#theme').onclick = () => {
   const r = document.documentElement;
   const dark = r.getAttribute('data-theme') === 'dark' ||
@@ -365,9 +378,11 @@ async function loadStatus() {
   fillVoletPickers(s.volets || []);
   if (!learning) { renderVoletPicker(); renderLearnSlots(); }
   wifiStatusLine(s.wifi); mqttStatusLine(s.mqtt);
+  const ci = $('#calib-info'); if (ci) ci.hidden = !!s.listening;   /* bandeau visible seulement si option OFF */
   const tb = $('#rf'); if (tb) tb.innerHTML = rf.map(f =>
     `<tr><td class="m">${f.t}</td><td title="${esc(f.serial)}">${esc(remoteName(f.serial))}</td>
       <td><span class="badge">0x${esc(f.button)}</span></td><td class="m">0x${esc(f.hop)}</td><td class="m">${f.rssi} dBm</td></tr>`).join('');
 }
+applyRoute();
 loadStatus();
 setInterval(loadStatus, 3000);
