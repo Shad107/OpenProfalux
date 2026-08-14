@@ -1,0 +1,18 @@
+menu "OpenProfalux"
+
+choice OPENPROFALUX_TARGET
+    prompt "Cible materielle"
+    default OPENPROFALUX_TARGET_EXTERNAL
+    help
+      Selectionne le pinout CC1101. Voir docs/WIRING.md pour le cablage
+      correspondant a chaque cible.
+
+config OPENPROFALUX_TARGET_EXTERNAL
+    bool "ESP32 DevKit + CC1101 externe (VSPI : MISO19 MOSI23 SCK18 CSN5 GDO0 4)"
+
+config OPENPROFALUX_TARGET_M5STACK
+    bool "M5Stack ATOM Lite (HSPI : MISO33 MOSI23 SCK19 CSN22 GDO0 25)"
+
+endchoice
+
+endmenu
