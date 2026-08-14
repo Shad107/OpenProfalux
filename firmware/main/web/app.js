@@ -8,7 +8,7 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '
 $$('.tab').forEach(t => t.onclick = () => {
   $$('.tab').forEach(x => x.classList.toggle('active', x === t));
   $$('.panel').forEach(p => p.classList.toggle('active', p.dataset.p === t.dataset.t));
-  if (t.dataset.t === 'wifi' || t.dataset.t === 'mqtt' || t.dataset.t === 'sys') loadConfig();
+  if (['wifi', 'mqtt', 'sys', 'ota'].includes(t.dataset.t)) loadConfig();
 });
 $('#theme').onclick = () => {
   const r = document.documentElement;
