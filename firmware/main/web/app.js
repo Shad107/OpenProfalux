@@ -101,13 +101,17 @@ function renderLearnSlots() {
     const learned = c != null;
     const row = document.createElement('div');
     row.className = 'slot' + (learned ? ' done' : '');
+    const moveSel = learned
+      ? `<select class="slot-move" data-from="${A.a}" title="Déplacer cette trame vers une autre action"><option value="">déplacer…</option>${LEARN_ACTIONS.filter(x => x.a !== A.a).map(x => `<option value="${x.a}">→ ${x.lbl}</option>`).join('')}</select>`
+      : '';
     row.innerHTML = `<span class="slot-ico">${A.ico}</span><span class="slot-lbl">${A.lbl}</span>
       <span class="slot-state">${learned ? `✓ appris <code>0x${(c.b).toString(16).toUpperCase()}</code> <code>${esc(c.s)}</code>` : 'à capturer'}</span>
-      <button class="btn slot-btn" data-a="${A.a}">${learned ? 'Recapturer' : 'Capturer'}</button>`;
+      ${moveSel}<button class="btn slot-btn" data-a="${A.a}">${learned ? 'Recapturer' : 'Capturer'}</button>`;
     box.appendChild(row);
   }
   const enabled = !!id && !learning;
   box.querySelectorAll('.slot-btn').forEach(b => { b.disabled = !enabled; b.onclick = () => captureAction(b.dataset.a, b); });
+  box.querySelectorAll('.slot-move').forEach(sel => { sel.disabled = !enabled; sel.onchange = () => { if (sel.value) reassign(sel.dataset.from, sel.value); }; });
   const serialEl = $('#learn-serial');
   if (serialEl) {
     const sers = (v && v.serials) || [];
@@ -144,6 +148,13 @@ if (renameBtn) renameBtn.onclick = async () => {
   await api('/api/remote', { method: 'POST', body: JSON.stringify({ serial, name: inp.value.trim() }) });
   toast('Télécommande renommée'); await loadStatus();
 };
+
+async function reassign(from, to) {
+  if (!activeVolet || from === to) { renderLearnSlots(); return; }
+  await api('/api/learn/reassign', { method: 'POST', body: JSON.stringify({ id: activeVolet, from, to }) });
+  toast(`Commande déplacée vers ${LEARN_ACTIONS.find(x => x.a === to).lbl}`);
+  await loadStatus();
+}
 
 async function captureAction(action, btn) {
   const id = activeVolet;

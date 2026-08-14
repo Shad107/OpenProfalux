@@ -24,6 +24,7 @@ int  shutters_delete_volet(const char *id);
 
 /* Apprentissage : affecte une trame captee (bitstring) a une action d'un volet. Cree le volet si absent. */
 int  shutters_learn_assign(const char *id, const char *action, const char *bits);
+int  shutters_reassign(const char *id, const char *from, const char *to);
 
 /* Calibration : temps de course. */
 int  shutters_calibrate(const char *id, uint32_t up_ms, uint32_t down_ms);

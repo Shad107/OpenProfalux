@@ -157,6 +157,15 @@ static esp_err_t h_learn_assign(httpd_req_t *r) {
     httpd_resp_sendstr(r, rc == 0 ? "{\"ok\":1}" : "{\"ok\":0}");
     return ESP_OK;
 }
+static esp_err_t h_learn_reassign(httpd_req_t *r) {
+    char *body = read_body(r); if (!body) return httpd_resp_send_err(r, 400, "body");
+    cJSON *j = cJSON_Parse(body); free(body);
+    if (!j) return httpd_resp_send_err(r, 400, "json");
+    int rc = shutters_reassign(jstr(j, "id"), jstr(j, "from"), jstr(j, "to"));
+    cJSON_Delete(j);
+    httpd_resp_sendstr(r, rc == 0 ? "{\"ok\":1}" : "{\"ok\":0}");
+    return ESP_OK;
+}
 
 /* ── /api/calibrate + /api/remote ── */
 static esp_err_t h_calibrate(httpd_req_t *r) {
@@ -351,6 +360,7 @@ void web_ui_start(void) {
     reg(s, "/api/learn/start",  HTTP_POST, h_learn_start);
     reg(s, "/api/learn/poll",   HTTP_GET,  h_learn_poll);
     reg(s, "/api/learn/assign", HTTP_POST, h_learn_assign);
+    reg(s, "/api/learn/reassign", HTTP_POST, h_learn_reassign);
     reg(s, "/api/calibrate", HTTP_POST, h_calibrate);
     reg(s, "/api/remote",    HTTP_POST, h_remote);
     reg(s, "/api/config",    HTTP_GET,  h_config_get);

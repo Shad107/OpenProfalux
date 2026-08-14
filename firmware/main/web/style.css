@@ -158,5 +158,6 @@ progress::-webkit-progress-value{background:var(--accent)}
 .slot.done .slot-state{color:var(--ok)}
 .slot-state code{font-family:var(--mono);font-size:.76rem}
 .slot-btn{flex:none;padding:7px 14px;font-size:.82rem}
+.slot-move{flex:none;font-size:.76rem;padding:5px 6px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--muted);cursor:pointer}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}

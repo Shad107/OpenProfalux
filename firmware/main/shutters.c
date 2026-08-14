@@ -345,6 +345,36 @@ int shutters_learn_assign(const char *id, const char *action, const char *bits) 
     UNLOCK();
     return 0;
 }
+
+/* Champs (bits + bouton) d'une action pour un volet. NULL si action inconnue. */
+static char *action_bits(volet_t *v, const char *a, uint8_t **btn) {
+    if (!strcmp(a, "up"))   { *btn = &v->up_btn;   return v->up; }
+    if (!strcmp(a, "stop")) { *btn = &v->stop_btn; return v->stop; }
+    if (!strcmp(a, "down")) { *btn = &v->down_btn; return v->down; }
+    return NULL;
+}
+
+/* Permute deux commandes apprises (corrige une trame rangee dans le mauvais slot,
+ * sans avoir a re-presser la telecommande). Si la cible est vide, revient a un deplacement. */
+int shutters_reassign(const char *id, const char *from, const char *to) {
+    if (!id || !from || !to) return -1;
+    if (!strcmp(from, to)) return 0;
+    LOCK();
+    volet_t *v = find_volet(id);
+    if (!v) { UNLOCK(); return -1; }
+    uint8_t *fb, *tb; char *fbits = action_bits(v, from, &fb), *tbits = action_bits(v, to, &tb);
+    if (!fbits || !tbits) { UNLOCK(); return -1; }
+    char tmp[SH_BITS_LEN]; uint8_t tmpb;
+    strlcpy(tmp, tbits, SH_BITS_LEN); tmpb = *tb;
+    strlcpy(tbits, fbits, SH_BITS_LEN); *tb = *fb;
+    strlcpy(fbits, tmp, SH_BITS_LEN); *fb = tmpb;
+    save_cfg();
+    announce_one(v);
+    UNLOCK();
+    ESP_LOGW(TAG, "reaffectation '%s' %s <-> %s", id, from, to);
+    return 0;
+}
+
 int shutters_calibrate(const char *id, uint32_t up_ms, uint32_t down_ms) {
     LOCK();
     volet_t *v = find_volet(id);
