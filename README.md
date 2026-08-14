@@ -1,21 +1,24 @@
 # OpenProfalux
 
-Firmware ESP32 + CC1101 open-source pour piloter des **volets roulants Profalux 868 MHz**
-(moteurs MAI-EMPX / MAI-EMNOE) depuis **Home Assistant**, **sans la clé constructeur**.
+**Piloter ses volets roulants Profalux depuis Home Assistant avec un ESP32 à ~15 €, sans la clé constructeur.**
+
+Firmware ESP32 + CC1101 open-source pour les volets **Profalux 868 MHz** (moteurs MAI-EMPX /
+MAI-EMNOE). Tout reste local : pas de cloud, pas de passerelle propriétaire, aucun fil à tirer.
 
 ## Le principe : cloner une télécommande, pas casser la crypto
 
-Les télécommandes Profalux utilisent KeeLoq (rolling code). Plutôt que de récupérer la
-clé constructeur (piste explorée longuement, cf. `firmware-capture-test/` et `docs/`),
-OpenProfalux prend un raccourci **validé au banc** :
+Les télécommandes Profalux sont en KeeLoq (rolling code), donc une trame est a priori
+impossible à rejouer. J'ai passé des jours à chasser la clé constructeur... avant de tester la
+chose la plus bête, celle que j'aurais dû essayer en premier :
 
-> **Le moteur accepte une trame rejouée.** Le compteur anti-rejeu n'est **pas** appliqué
-> par le récepteur : une trame capturée puis réémise fait bouger le volet, même après
-> usage de la vraie télécommande. Donc **aucune clé n'est nécessaire** : on **clone** une
-> télécommande existante par capture + rejeu.
+> **Le moteur accepte une trame rejouée.** Le compteur anti-rejeu n'est **pas** vérifié par le
+> récepteur : une trame capturée puis réémise fait bouger le volet, même après avoir utilisé la
+> vraie télécommande entre-temps. Donc **aucune clé n'est nécessaire.**
 
-Concrètement : on capture les trames ▲ / ■ / ▼ d'une télécommande physique, on les nomme,
-et on les rejoue à la demande depuis Home Assistant. C'est tout.
+OpenProfalux **clone** donc une télécommande, sans crypto : on capture les trames ▲ / ■ / ▼
+d'une vraie télécommande, on les nomme, et on les rejoue à la demande depuis Home Assistant.
+C'est tout. La clé constructeur, explorée longuement (cf. `firmware-capture-test/` et `docs/`),
+s'est révélée inutile pour le pilotage.
 
 ## Ce que fait le firmware (`firmware/`)
 
