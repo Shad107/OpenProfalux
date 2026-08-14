@@ -348,7 +348,7 @@ int cc1101_rx_listen_bits(uint32_t timeout_ms, char *out_bits, int max_bits) {
     rmt_rx_done_event_data_t ev;
     if (rmt_receive(s_cap, s_capbuf, sizeof(s_capbuf), &rc) == ESP_OK) {
         while (esp_timer_get_time() < t_end) {
-            if (xQueueReceive(s_capq, &ev, pdMS_TO_TICKS(250)) != pdTRUE) continue;  /* tjrs en RX */
+            if (xQueueReceive(s_capq, &ev, pdMS_TO_TICKS(100)) != pdTRUE) continue;  /* tjrs en RX */
             int n = decode_rmt(ev.received_symbols, ev.num_symbols, out_bits, max_bits);
             if (n >= 64) { r = n; break; }                                  /* vraie trame */
             if (rmt_receive(s_cap, s_capbuf, sizeof(s_capbuf), &rc) != ESP_OK) break;  /* re-arme */

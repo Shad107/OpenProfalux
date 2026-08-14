@@ -15,6 +15,7 @@
 #include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_timer.h"
 #include "cJSON.h"
 #include "cc1101.h"
 
@@ -46,17 +47,30 @@ static uint32_t bits_lsb(const char *b, int from, int len) {
     return v;
 }
 
+static volatile bool s_lwant_stop = false;   /* action apprise = stop (bouton 0x2) sinon mouvement (0x1/0x4) */
+
 static void learn_task(void *arg) {
     (void)arg;
     char bits[SH_BITS_LEN];
-    /* ecoute dediee via l'arbitre : suspend le RX permanent, prend la radio, ecoute 15 s */
-    int n = radio_listen_once(15000, bits, SH_BITS_LEN - 1);
-    if (n >= 60) {
+    /* ecoute dediee via l'arbitre : suspend le RX permanent, prend la radio, ecoute 15 s.
+     * On BOUCLE : on ne retient que la trame dont le bouton correspond a l'action demandee
+     * (stop=0x2 ; montee/descente=0x1 ou 0x4). Une trame d'un autre bouton est ignoree et
+     * on continue d'ecouter, pour ne jamais ranger une trame STOP dans le slot Montee, etc. */
+    int64_t end = esp_timer_get_time() + 15000LL * 1000;
+    while (esp_timer_get_time() < end) {
+        int remain = (int)((end - esp_timer_get_time()) / 1000);
+        if (remain < 200) break;
+        int n = radio_listen_once(remain, bits, SH_BITS_LEN - 1);
+        if (n < 60) break;                     /* rien capte dans la fenetre : on arrete */
+        uint8_t btn = (uint8_t)bits_lsb(bits, 60, 4);
+        bool match = s_lwant_stop ? (btn == 0x2) : (btn == 0x1 || btn == 0x4);
+        if (!match) continue;                  /* mauvais bouton : on continue d'ecouter */
         strlcpy(s_lbits, bits, SH_BITS_LEN);
         s_lserial = bits_lsb(bits, 32, 28);
-        s_lbtn    = (uint8_t)bits_lsb(bits, 60, 4);
+        s_lbtn    = btn;
         s_lrssi   = cc1101_get_rssi();
         s_lready  = true;
+        break;
     }
     s_lactive = false;
     vTaskDelete(NULL);
@@ -94,7 +108,7 @@ static esp_err_t h_js   (httpd_req_t *r) { return send_asset(r, "application/jav
 
 /* ── /api/status ── */
 static esp_err_t h_status(httpd_req_t *r) {
-    static char buf[3072];
+    static char buf[4096];
     int n = shutters_status_json(buf, sizeof(buf));
     httpd_resp_set_type(r, "application/json");
     return httpd_resp_send(r, buf, n > 0 ? n : 0);
@@ -115,7 +129,13 @@ static esp_err_t h_shutter(httpd_req_t *r) {
 
 /* ── /api/learn/start + /poll ── */
 static esp_err_t h_learn_start(httpd_req_t *r) {
-    if (!s_lactive) { s_lready = false; s_lactive = true; xTaskCreate(learn_task, "learn", 4096, NULL, 6, NULL); }
+    char *body = read_body(r);
+    bool want_stop = false;
+    if (body) {
+        cJSON *j = cJSON_Parse(body); free(body);
+        if (j) { const char *a = jstr(j, "action"); want_stop = (a && !strcmp(a, "stop")); cJSON_Delete(j); }
+    }
+    if (!s_lactive) { s_lwant_stop = want_stop; s_lready = false; s_lactive = true; xTaskCreate(learn_task, "learn", 4096, NULL, 6, NULL); }
     httpd_resp_sendstr(r, "{\"ok\":1}");
     return ESP_OK;
 }

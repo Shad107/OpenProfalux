@@ -437,6 +437,12 @@ int shutters_status_json(char *buf, int cap) {
         cJSON_AddNumberToObject(o, "position", (int)(v->position + 0.5f));
         cJSON *sr = cJSON_AddArrayToObject(o, "serials");
         for (int j = 0; j < v->n_serials; j++) cJSON_AddItemToArray(sr, cJSON_CreateString(v->serials[j]));
+        /* etat des 3 commandes : bouton appris (nibble) si le slot est rempli, absent sinon.
+         * Permet a l'UI d'apprentissage centree-volet d'afficher appris / a capturer. */
+        cJSON *cmd = cJSON_AddObjectToObject(o, "cmd");
+        if (v->up[0])   cJSON_AddNumberToObject(cmd, "up",   v->up_btn);
+        if (v->stop[0]) cJSON_AddNumberToObject(cmd, "stop", v->stop_btn);
+        if (v->down[0]) cJSON_AddNumberToObject(cmd, "down", v->down_btn);
         cJSON_AddItemToArray(vols, o);
     }
     cJSON *rf = cJSON_AddArrayToObject(root, "rf");
@@ -474,6 +480,7 @@ int shutters_status_json(char *buf, int cap) {
     cJSON_Delete(root);
     int n = 0;
     if (js) { n = snprintf(buf, cap, "%s", js); free(js); }
+    if (n >= cap) n = cap - 1;   /* snprintf renvoie la longueur NON tronquee : borner pour ne pas sur-lire buf */
     return n;
 }
 

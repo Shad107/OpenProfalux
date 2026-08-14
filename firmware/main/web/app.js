@@ -56,34 +56,63 @@ function renderVolets(list, rf) {
   }
 }
 
-/* ── Apprentissage ── */
-let learnAct = null, learnBits = null, learnSerial = null;
-$$('#acts button').forEach(b => b.onclick = () => {
-  learnAct = b.dataset.a;
-  $$('#acts button').forEach(x => x.classList.toggle('on', x === b));
-  $('#listen-btn').disabled = false; $('#listen-btn').textContent = `Écouter (${learnAct})`;
-});
-$('#listen-btn').onclick = async () => {
-  $('#listen-btn').textContent = 'À l’écoute… appuie sur la télécommande'; $('#listen-btn').disabled = true;
-  await api('/api/learn/start', { method: 'POST' });
+/* ── Apprentissage (centré volet) ── */
+const LEARN_ACTIONS = [
+  { a: 'up',   ico: '▲', lbl: 'Montée' },
+  { a: 'stop', ico: '■', lbl: 'Stop' },
+  { a: 'down', ico: '▼', lbl: 'Descente' },
+];
+let learning = false;   // capture en cours
+
+function renderLearnSlots() {
+  const box = $('#learn-slots'); if (!box) return;
+  const id = $('#learn-id') ? $('#learn-id').value.trim() : '';
+  const v = (statusCache.volets || []).find(x => x.id === id);
+  const cmd = (v && v.cmd) || {};
+  box.innerHTML = '';
+  for (const A of LEARN_ACTIONS) {
+    const learned = cmd[A.a] != null;
+    const row = document.createElement('div');
+    row.className = 'slot' + (learned ? ' done' : '');
+    row.innerHTML = `<span class="slot-ico">${A.ico}</span><span class="slot-lbl">${A.lbl}</span>
+      <span class="slot-state">${learned ? `✓ appris <code>0x${cmd[A.a].toString(16).toUpperCase()}</code>` : 'à capturer'}</span>
+      <button class="btn slot-btn" data-a="${A.a}">${learned ? 'Recapturer' : 'Capturer'}</button>`;
+    box.appendChild(row);
+  }
+  const enabled = !!id && !learning;
+  box.querySelectorAll('.slot-btn').forEach(b => { b.disabled = !enabled; b.onclick = () => captureAction(b.dataset.a, b); });
+  const hint = $('#learn-hint');
+  if (hint) hint.textContent = id
+    ? 'Clique Capturer, puis appuie une fois sur le bouton correspondant de ta télécommande (< 1 m du boîtier).'
+    : 'Renseigne un nom de volet pour activer la capture.';
+}
+
+async function captureAction(action, btn) {
+  const id = $('#learn-id').value.trim();
+  if (!id) { toast('Donne d’abord un nom de volet'); return; }
+  const label = LEARN_ACTIONS.find(x => x.a === action).lbl;
+  learning = true; renderLearnSlots();
+  btn.disabled = true; btn.textContent = `⏳ Appuie sur ${label}…`;
+  await api('/api/learn/start', { method: 'POST', body: JSON.stringify({ action }) });
+  const t0 = Date.now();
   const poll = setInterval(async () => {
     const r = await api('/api/learn/poll').catch(() => null);
     if (r && r.bits) {
-      clearInterval(poll); learnBits = r.bits; learnSerial = r.serial;
-      $('#cap-info').textContent = `serial ${r.serial} · bouton 0x${r.button} · ${r.rssi} dBm`;
-      $('#cap-name').value = (statusCache.remotes || {})[r.serial] || '';
-      $('#learn-result').hidden = false;
-      $('#listen-btn').textContent = `Écouter (${learnAct})`; $('#listen-btn').disabled = false;
+      clearInterval(poll); learning = false;
+      const name = $('#cap-name').value.trim();
+      if (name) await api('/api/remote', { method: 'POST', body: JSON.stringify({ serial: r.serial, name }) });
+      await api('/api/learn/assign', { method: 'POST', body: JSON.stringify({ id, action, bits: r.bits }) });
+      toast(`✓ ${label} apprise (0x${r.button}, ${r.rssi} dBm)`);
+      await loadStatus();     // rafraîchit -> le slot passe en ✓
+    } else if (Date.now() - t0 > 16000) {
+      clearInterval(poll); learning = false;
+      toast(`Rien capté pour ${label}, rapproche-toi et réessaie`);
+      renderLearnSlots();
     }
-  }, 500);
-};
-$('#assign-btn').onclick = async () => {
-  const name = $('#cap-name').value.trim();
-  if (name && learnSerial) await api('/api/remote', { method: 'POST', body: JSON.stringify({ serial: learnSerial, name }) });
-  await api('/api/learn/assign', { method: 'POST',
-    body: JSON.stringify({ id: $('#learn-id').value.trim(), action: learnAct, bits: learnBits }) });
-  $('#learn-result').hidden = true; toast('Commande affectée'); loadStatus();
-};
+  }, 400);
+}
+
+if ($('#learn-id')) $('#learn-id').oninput = renderLearnSlots;
 
 /* ── Télécommandes ── */
 function renderRemotes(map, rf) {
@@ -237,8 +266,8 @@ async function loadStatus() {
   statusCache = s;
   const rf = s.rf || [];
   renderVolets(s.volets || [], rf);
-  renderRemotes(s.remotes || {}, rf);
   fillVoletPickers(s.volets || []);
+  if (!learning) renderLearnSlots();
   wifiStatusLine(s.wifi); mqttStatusLine(s.mqtt);
   const tb = $('#rf'); if (tb) tb.innerHTML = rf.map(f =>
     `<tr><td class="m">${f.t}</td><td title="${esc(f.serial)}">${esc(remoteName(f.serial))}</td>
