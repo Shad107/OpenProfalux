@@ -9,172 +9,173 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<div class="appbar">
-  <div class="brand">
-    <svg class="logo" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-      <rect x="4" y="4" width="24" height="24" rx="4.5" stroke="currentColor" stroke-width="2"/>
-      <rect x="4" y="4" width="24" height="5.5" rx="2.5" fill="currentColor"/>
-      <path d="M6.5 13h19M6.5 16.4h19M6.5 19.8h19" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" opacity=".8"/>
-    </svg>
-    <div><h1>OpenProfalux</h1><div class="tag">Volets Profalux 868 · <span id="version">v1.0</span></div></div>
-  </div>
-  <div class="status-pills">
-    <span class="pill off" id="p-wifi"><span class="dot"></span>Wi-Fi</span>
-    <span class="pill off" id="p-mqtt"><span class="dot"></span>MQTT</span>
-  </div>
-  <button class="icon-btn" id="theme" title="Thème clair / sombre">◐</button>
+<div class="app">
+  <header class="app-header">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <rect x="4" y="4" width="24" height="24" rx="4.5" stroke="currentColor" stroke-width="2"/>
+        <rect x="4" y="4" width="24" height="5.5" rx="2.5" fill="currentColor"/>
+        <path d="M6.5 13h19M6.5 16.4h19M6.5 19.8h19" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" opacity=".8"/>
+      </svg>
+      <div><h1>OpenProfalux</h1><div class="tag">Volets Profalux 868 · <span id="version">v1.0</span></div></div>
+    </div>
+    <button class="icon-btn" id="theme" title="Thème clair / sombre">◐</button>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-t="control"><span>🪟</span>Volets</button>
+    <button class="tab" data-t="remotes"><span>📱</span>Télécommandes</button>
+    <button class="tab" data-t="rf"><span>📻</span>RF</button>
+    <button class="tab" data-t="sys"><span>⚙️</span>Système</button>
+  </nav>
+
+  <main>
+    <!-- Volets -->
+    <section class="panel active" data-p="control">
+      <div class="grid two" id="volets"></div>
+      <p class="hint" id="control-empty" hidden>Aucun volet. Va dans <b>Télécommandes → Apprentissage</b> pour en capturer un.</p>
+    </section>
+
+    <!-- Télécommandes (sous-onglets) -->
+    <section class="panel" data-p="remotes">
+      <nav class="subtabs">
+        <button class="subtab active" data-s="list">Télécommandes</button>
+        <button class="subtab" data-s="learn">Apprentissage</button>
+        <button class="subtab" data-s="calib">Calibration</button>
+      </nav>
+
+      <div class="subpanel active" data-sp="list">
+        <div class="card">
+          <h2>Télécommandes vues sur l'air</h2>
+          <p class="sub">Donne un nom lisible à chaque serial détecté.</p>
+          <div class="grid" id="remotes-list"></div>
+          <p class="hint" id="remotes-empty" hidden>Aucune télécommande vue. Capture-en une dans <b>Apprentissage</b>.</p>
+        </div>
+      </div>
+
+      <div class="subpanel" data-sp="learn">
+        <div class="card">
+          <h2>Capturer une commande</h2>
+          <p class="sub">Le boîtier écoute ta vraie télécommande et mémorise la trame. Une capture par commande suffit — elle est rejouable à vie.</p>
+          <ol class="steps">
+            <li>Choisis l'action, puis clique <b>Écouter</b>.</li>
+            <li>Appuie <b>une fois</b> sur le bouton correspondant de ta télécommande.</li>
+            <li>La trame captée s'affiche → <b>Affecter</b> au volet.</li>
+          </ol>
+          <div class="field"><label>Volet</label><input id="learn-id" list="volet-list" placeholder="nom existant, ou nouveau"></div>
+          <datalist id="volet-list"></datalist>
+          <div class="seg" id="acts">
+            <button data-a="up">▲ Montée</button><button data-a="stop">■ Stop</button><button data-a="down">▼ Descente</button>
+          </div>
+          <button id="listen-btn" class="btn primary wide" disabled>Écouter — choisis une action</button>
+          <div id="learn-result" hidden style="margin-top:15px">
+            <p class="hint">Trame captée : <code id="cap-info">—</code></p>
+            <div class="field"><label>Nom de cette télécommande</label><input id="cap-name" placeholder="ex : Murale chambre"></div>
+            <div class="row end"><button id="assign-btn" class="btn primary">Affecter au volet</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="subpanel" data-sp="calib">
+        <div class="card">
+          <h2>Calibrer la position</h2>
+          <p class="sub">Le moteur ne renvoie pas sa position : on mesure le temps de course pour estimer le %.</p>
+          <div class="field"><label>Volet</label><select id="calib-id"></select></div>
+          <ol class="steps">
+            <li>Volet en <b>butée haute</b>. <b>Démarrer descente</b> → <b>Arrivé en bas</b>.</li>
+            <li>Idem pour la montée.</li>
+          </ol>
+          <div class="row"><button id="cal-down-start" class="btn">▼ Démarrer descente</button><button id="cal-down-stop" class="btn" disabled>Arrivé en bas · <b><span id="cal-down-t">0.0s</span></b></button></div>
+          <div class="row" style="margin-top:9px"><button id="cal-up-start" class="btn">▲ Démarrer montée</button><button id="cal-up-stop" class="btn" disabled>Arrivé en haut · <b><span id="cal-up-t">0.0s</span></b></button></div>
+          <div class="row end" style="margin-top:15px"><button id="cal-save" class="btn primary" disabled>Enregistrer la calibration</button></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- RF -->
+    <section class="panel" data-p="rf">
+      <div class="card">
+        <h2>Trames en direct</h2>
+        <p class="sub">Chaque commande RF captée — télécommandes et nos rejeux.</p>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>t</th><th>Télécommande</th><th>Bouton</th><th>Hopping</th><th>RSSI</th></tr></thead>
+          <tbody id="rf"></tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- Système (sous-onglets) -->
+    <section class="panel" data-p="sys">
+      <nav class="subtabs">
+        <button class="subtab active" data-s="wifi">Wi-Fi</button>
+        <button class="subtab" data-s="mqtt">MQTT</button>
+        <button class="subtab" data-s="device">Appareil</button>
+        <button class="subtab" data-s="ota">OTA</button>
+        <button class="subtab" data-s="backup">Sauvegarde</button>
+      </nav>
+
+      <div class="subpanel active" data-sp="wifi">
+        <div class="card">
+          <h2>Wi-Fi</h2>
+          <p class="sub">Connexion du boîtier à ton réseau domestique (2,4 GHz — l'ESP32 ne voit pas le 5 GHz).</p>
+          <div class="statline" id="wifi-status"><span class="dot"></span><b>—</b></div>
+          <div class="field"><label>Nom du réseau (SSID)</label><input id="wifi-ssid"></div>
+          <div class="field"><label>Mot de passe</label><input id="wifi-pass" type="password" placeholder="•••••••• (inchangé si vide)"></div>
+          <label class="switch"><input type="checkbox" id="wifi-reboot" checked><span class="track"></span>
+            <span class="lbl">Redémarrer après enregistrement<small>Nécessaire pour appliquer un nouveau réseau</small></span></label>
+          <div class="row end"><button id="wifi-save" class="btn primary">Enregistrer le Wi-Fi</button></div>
+        </div>
+      </div>
+
+      <div class="subpanel" data-sp="mqtt">
+        <div class="card">
+          <h2>MQTT</h2>
+          <p class="sub">Pont vers Home Assistant. Le boîtier publie l'état des volets et reçoit les commandes.</p>
+          <div class="statline" id="mqtt-status"><span class="dot"></span><b>—</b></div>
+          <div class="field"><label>Broker</label><input id="mqtt-uri" placeholder="mqtt://192.168.1.10"></div>
+          <div class="row" style="margin:-4px 0 12px"><button class="btn ghost" id="mqtt-detect">🔍 Détecter le broker (mDNS)</button></div>
+          <div class="field"><label>Utilisateur</label><input id="mqtt-user" placeholder="(optionnel)"></div>
+          <div class="field"><label>Mot de passe</label><input id="mqtt-pass" type="password" placeholder="•••••••• (inchangé si vide)"></div>
+          <div class="row end"><button id="mqtt-save" class="btn primary">Enregistrer le MQTT</button></div>
+        </div>
+      </div>
+
+      <div class="subpanel" data-sp="device">
+        <div class="card">
+          <h2>Appareil</h2>
+          <div class="field" style="margin-top:12px"><label>Nom de l'appareil</label><input id="sys-device" placeholder="openprofalux"></div>
+          <label class="switch"><input type="checkbox" id="sys-logframes"><span class="track"></span>
+            <span class="lbl">Journaliser toutes les trames en MQTT<small>Écoute RF permanente · redémarrage requis</small></span></label>
+          <label class="switch"><input type="checkbox" id="sys-reboot"><span class="track"></span>
+            <span class="lbl">Redémarrer après enregistrement</span></label>
+          <div class="row end"><button id="sys-save" class="btn primary">Enregistrer</button></div>
+        </div>
+      </div>
+
+      <div class="subpanel" data-sp="ota">
+        <div class="card">
+          <h2>Mise à jour (OTA)</h2>
+          <p class="sub">Version courante : <code id="ota-version">—</code></p>
+          <div class="field"><label>Fichier firmware (.bin)</label><input type="file" id="ota-file" accept=".bin"></div>
+          <div class="row"><button id="ota-btn" class="btn primary">Flasher</button><button id="ota-rollback" class="btn danger">↩ Version précédente</button></div>
+          <div id="ota-prog" hidden style="margin-top:12px"><progress id="ota-bar" max="100" value="0"></progress> <span class="hint" id="ota-msg"></span></div>
+          <p class="hint" style="margin-top:12px">Écrit sur la partition inactive ; rollback automatique si le démarrage échoue.</p>
+        </div>
+      </div>
+
+      <div class="subpanel" data-sp="backup">
+        <div class="card">
+          <h2>Sauvegarde</h2>
+          <p class="sub">Télécommandes, trames de référence et calibration. À garder hors de l'ESP32 pour tout restaurer après un reset.</p>
+          <div class="row"><a id="backup-dl" class="btn primary" href="/api/backup" download="openprofalux-backup.json">⬇ Télécharger</a></div>
+          <h3>Restaurer</h3>
+          <div class="field"><input type="file" id="restore-file" accept=".json,application/json"></div>
+          <div class="row"><button id="restore-btn" class="btn">Restaurer (remplace la config actuelle)</button></div>
+        </div>
+      </div>
+    </section>
+  </main>
 </div>
-
-<nav class="tabs" id="tabs">
-  <button class="tab active" data-t="control"><span>🪟</span>Volets</button>
-  <button class="tab" data-t="learn"><span>🎓</span>Apprentissage</button>
-  <button class="tab" data-t="remotes"><span>📱</span>Télécommandes</button>
-  <button class="tab" data-t="calib"><span>🎯</span>Calibration</button>
-  <button class="tab" data-t="rf"><span>📻</span>RF</button>
-  <button class="tab" data-t="wifi"><span>📶</span>Wi-Fi</button>
-  <button class="tab" data-t="mqtt"><span>📡</span>MQTT</button>
-  <button class="tab" data-t="sys"><span>⚙️</span>Système</button>
-</nav>
-
-<main>
-  <!-- Volets -->
-  <section class="panel active" data-p="control">
-    <div class="grid two" id="volets"></div>
-    <p class="hint" id="control-empty" hidden>Aucun volet. Va dans <b>Apprentissage</b> pour en capturer un.</p>
-  </section>
-
-  <!-- Apprentissage -->
-  <section class="panel" data-p="learn">
-    <div class="card">
-      <h2>Capturer une commande</h2>
-      <p class="sub">Le boîtier écoute ta vraie télécommande et mémorise la trame. Une capture par commande suffit — elle est rejouable à vie.</p>
-      <ol class="steps">
-        <li>Choisis l'action, puis clique <b>Écouter</b>.</li>
-        <li>Appuie <b>une fois</b> sur le bouton correspondant de ta télécommande.</li>
-        <li>La trame captée s'affiche → <b>Affecter</b> au volet.</li>
-      </ol>
-      <div class="field"><label>Volet</label><input id="learn-id" placeholder="ex : chambre"></div>
-      <div class="seg" id="acts">
-        <button data-a="up">▲ Montée</button><button data-a="stop">■ Stop</button><button data-a="down">▼ Descente</button>
-      </div>
-      <button id="listen-btn" class="btn primary wide" disabled>Écouter — choisis une action</button>
-      <div id="learn-result" hidden style="margin-top:15px">
-        <p class="hint">Trame captée : <code id="cap-info">—</code></p>
-        <div class="field"><label>Nom de cette télécommande</label><input id="cap-name" placeholder="ex : Murale chambre"></div>
-        <div class="row end"><button id="assign-btn" class="btn primary">Affecter au volet</button></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Télécommandes -->
-  <section class="panel" data-p="remotes">
-    <div class="card">
-      <h2>Télécommandes vues sur l'air</h2>
-      <p class="sub">Donne un nom lisible à chaque serial détecté.</p>
-      <div class="grid" id="remotes-list"></div>
-      <p class="hint" id="remotes-empty" hidden>Aucune télécommande vue. Capture-en une dans <b>Apprentissage</b>.</p>
-    </div>
-  </section>
-
-  <!-- Calibration -->
-  <section class="panel" data-p="calib">
-    <div class="card">
-      <h2>Calibrer la position</h2>
-      <p class="sub">Le moteur ne renvoie pas sa position : on mesure le temps de course pour estimer le %.</p>
-      <div class="field"><label>Volet</label><input id="calib-id" placeholder="ex : chambre"></div>
-      <ol class="steps">
-        <li>Volet en <b>butée haute</b>. <b>Démarrer descente</b> → <b>Arrivé en bas</b>.</li>
-        <li>Idem pour la montée.</li>
-      </ol>
-      <div class="row"><button id="cal-down-start" class="btn">▼ Démarrer descente</button><button id="cal-down-stop" class="btn" disabled>Arrivé en bas · <b><span id="cal-down-t">0.0s</span></b></button></div>
-      <div class="row" style="margin-top:9px"><button id="cal-up-start" class="btn">▲ Démarrer montée</button><button id="cal-up-stop" class="btn" disabled>Arrivé en haut · <b><span id="cal-up-t">0.0s</span></b></button></div>
-      <div class="row end" style="margin-top:15px"><button id="cal-save" class="btn primary" disabled>Enregistrer la calibration</button></div>
-    </div>
-  </section>
-
-  <!-- RF -->
-  <section class="panel" data-p="rf">
-    <div class="card">
-      <h2>Trames en direct</h2>
-      <p class="sub">Chaque commande RF captée — télécommandes et nos rejeux.</p>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>t</th><th>Télécommande</th><th>Bouton</th><th>Hopping</th><th>RSSI</th></tr></thead>
-        <tbody id="rf"></tbody>
-      </table></div>
-    </div>
-  </section>
-
-  <!-- Wi-Fi -->
-  <section class="panel" data-p="wifi">
-    <div class="card">
-      <h2>Wi-Fi</h2>
-      <p class="sub">Connexion du boîtier à ton réseau domestique (2,4 GHz — l'ESP32 ne voit pas le 5 GHz).</p>
-      <div class="statline" id="wifi-status"><span class="dot"></span><b>—</b></div>
-      <div class="field"><label>Nom du réseau (SSID)</label><input id="wifi-ssid"></div>
-      <div class="field"><label>Mot de passe</label><input id="wifi-pass" type="password" placeholder="•••••••• (inchangé si vide)"></div>
-      <label class="switch"><input type="checkbox" id="wifi-reboot" checked><span class="track"></span>
-        <span class="lbl">Redémarrer après enregistrement<small>Nécessaire pour appliquer un nouveau réseau</small></span></label>
-      <div class="row end"><button id="wifi-save" class="btn primary">Enregistrer le Wi-Fi</button></div>
-    </div>
-  </section>
-
-  <!-- MQTT -->
-  <section class="panel" data-p="mqtt">
-    <div class="card">
-      <h2>MQTT</h2>
-      <p class="sub">Pont vers Home Assistant. Le boîtier publie l'état des volets et reçoit les commandes.</p>
-      <div class="statline" id="mqtt-status"><span class="dot"></span><b>—</b></div>
-      <div class="field"><label>Broker</label><input id="mqtt-uri" placeholder="mqtt://192.168.1.10"></div>
-      <div class="row" style="margin:-4px 0 12px"><button class="btn ghost" id="mqtt-detect">🔍 Détecter le broker (mDNS)</button></div>
-      <div class="field"><label>Utilisateur</label><input id="mqtt-user" placeholder="(optionnel)"></div>
-      <div class="field"><label>Mot de passe</label><input id="mqtt-pass" type="password" placeholder="•••••••• (inchangé si vide)"></div>
-      <div class="row end"><button id="mqtt-save" class="btn primary">Enregistrer le MQTT</button></div>
-    </div>
-  </section>
-
-  <!-- Système (sous-onglets Appareil / OTA / Sauvegarde) -->
-  <section class="panel" data-p="sys">
-    <nav class="subtabs" id="systabs">
-      <button class="subtab active" data-s="device">Appareil</button>
-      <button class="subtab" data-s="ota">OTA</button>
-      <button class="subtab" data-s="backup">Sauvegarde</button>
-    </nav>
-
-    <div class="subpanel active" data-sp="device">
-      <div class="card">
-        <h2>Appareil</h2>
-        <div class="field" style="margin-top:12px"><label>Nom de l'appareil</label><input id="sys-device" placeholder="openprofalux"></div>
-        <label class="switch"><input type="checkbox" id="sys-logframes"><span class="track"></span>
-          <span class="lbl">Journaliser toutes les trames en MQTT<small>Écoute RF permanente · redémarrage requis</small></span></label>
-        <label class="switch"><input type="checkbox" id="sys-reboot"><span class="track"></span>
-          <span class="lbl">Redémarrer après enregistrement</span></label>
-        <div class="row end"><button id="sys-save" class="btn primary">Enregistrer</button></div>
-      </div>
-    </div>
-
-    <div class="subpanel" data-sp="ota">
-      <div class="card">
-        <h2>Mise à jour (OTA)</h2>
-        <p class="sub">Version courante : <code id="ota-version">—</code></p>
-        <div class="field"><label>Fichier firmware (.bin)</label><input type="file" id="ota-file" accept=".bin"></div>
-        <div class="row"><button id="ota-btn" class="btn primary">Flasher</button><button id="ota-rollback" class="btn danger">↩ Version précédente</button></div>
-        <div id="ota-prog" hidden style="margin-top:12px"><progress id="ota-bar" max="100" value="0"></progress> <span class="hint" id="ota-msg"></span></div>
-        <p class="hint" style="margin-top:12px">Écrit sur la partition inactive ; rollback automatique si le démarrage échoue.</p>
-      </div>
-    </div>
-
-    <div class="subpanel" data-sp="backup">
-      <div class="card">
-        <h2>Sauvegarde</h2>
-        <p class="sub">Télécommandes, trames de référence et calibration. À garder hors de l'ESP32 pour tout restaurer après un reset.</p>
-        <div class="row"><a id="backup-dl" class="btn primary" href="/api/backup" download="openprofalux-backup.json">⬇ Télécharger</a></div>
-        <h3>Restaurer</h3>
-        <div class="field"><input type="file" id="restore-file" accept=".json,application/json"></div>
-        <div class="row"><button id="restore-btn" class="btn">Restaurer (remplace la config actuelle)</button></div>
-      </div>
-    </div>
-  </section>
-</main>
 
 <div class="toast" id="toast"></div>
 <script src="/app.js"></script>
