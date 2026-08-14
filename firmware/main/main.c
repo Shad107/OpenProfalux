@@ -98,6 +98,34 @@ static void clear_frames_nvs(void) {
     ESP_LOGW("caps", "journal NVS des trames EFFACE.");
 }
 
+/* Recharge les trames NVS dans le tableau de rejeu (au boot) : le rejeu 2/3 marche
+ * sans re-capturer, meme apres coupure de courant. Retourne le nb charge. */
+static int load_frames_nvs(char capbuf[][80], int *capbits, uint32_t *capgap, int maxn) {
+    nvs_handle_t h;
+    if (nvs_open("caps", NVS_READONLY, &h) != ESP_OK) return 0;
+    uint16_t n = 0; nvs_get_u16(h, "n", &n);
+    int cnt = 0;
+    for (uint16_t i = 0; i < n && cnt < maxn; i++) {
+        char key[8]; snprintf(key, sizeof(key), "c%u", (unsigned)i);
+        char val[96]; size_t sz = sizeof(val);
+        if (nvs_get_str(h, key, val, &sz) != ESP_OK) continue;
+        /* format "rssi=%d gap=%u <bits>" : les bits sont apres le 2e espace */
+        char *p = strchr(val, ' '); if (!p) continue;
+        p = strchr(p + 1, ' ');     if (!p) continue;
+        p++;
+        unsigned int gtmp = 0; sscanf(val, "rssi=%*d gap=%u", &gtmp);
+        uint32_t gap = gtmp;
+        int nb = strlen(p);
+        if (nb < 64 || nb > 78) continue;
+        strncpy(capbuf[cnt], p, 79); capbuf[cnt][nb] = '\0';
+        capbits[cnt] = nb; capgap[cnt] = gap;
+        cnt++;
+    }
+    nvs_close(h);
+    if (cnt) ESP_LOGI("caps", "%d trame(s) rechargee(s) depuis NVS -> rejeu 2/3 pret sans re-capture", cnt);
+    return cnt;
+}
+
 /* ────── MQTT handlers ────── */
 
 static void on_pair(const char *device) {
@@ -224,7 +252,7 @@ void app_main(void) {
      * appui sur le bouton integre de l'ATOM Lite (GPIO39) -> burst d'appairage. */
     gpio_config_t btn = { .pin_bit_mask = 1ULL << 39, .mode = GPIO_MODE_INPUT };
     gpio_config(&btn);
-    ESP_LOGI(TAG, "PRET. Bouton G39 : 1 appui=ENREGISTRE sequence | 2=rejeu BRUT | 3=via OpenProfalux | 4+=efface NVS.");
+    ESP_LOGI(TAG, "PRET. Bouton G39 : 1=ENREGISTRE | 2=rejeu BRUT | 3=via OpenProfalux | 4=RECHARGE NVS | 5+=efface NVS.");
 
     /* Bouton ATOM (G39) :
      *   - appui LONG (>1,5 s) = ENROLEMENT (burst bouton PROG 0x8)
@@ -240,14 +268,15 @@ void app_main(void) {
      *   - 3 appuis      = TEST 2 : rejeu de la sequence via OpenProfalux (build_with_hop,
      *                     vrai hop reversé) = preuve que OpenProfalux emet correctement
      *                     (framing byte-identique 7/7 offline).
-     *   - 4 appuis ou + = efface le journal NVS des trames (nouvelle campagne).
+     *   - 4 appuis      = RECHARGE les trames NVS dans le tableau (rejeu 2/3 sans re-capture, ex: apres coupure).
+     *   - 5 appuis ou + = efface le journal NVS des trames (nouvelle campagne).
      * Chaque commande est aussi persistee en NVS (analyse ulterieure, redump au boot).
      * Rappel : le rejeu ne marche que si le moteur n'a PAS entendu la trame (rolling). */
     #define CAP_MAX 16
     static char capbuf[CAP_MAX][80];
     static int  capbits[CAP_MAX];
     static uint32_t capgap[CAP_MAX];      /* ms depuis la trame precedente */
-    int count = 0;
+    int count = 0;   /* pas de recharge auto : 4 appuis pour recharger depuis NVS */
     int prev = 1; uint32_t hb = 0;
     while (1) {
         int now = gpio_get_level(39);
@@ -327,9 +356,14 @@ void app_main(void) {
                     ESP_LOGI(TAG, "  TEST 2 fini. Le volet a suivi la sequence ? (si oui = OpenProfalux emet correctement)");
                 }
 
+            } else if (taps == 4) {
+                /* ---- 4 APPUIS : RECHARGE les trames NVS dans le tableau de rejeu ---- */
+                count = load_frames_nvs(capbuf, capbits, capgap, CAP_MAX);
+                ESP_LOGI(TAG, ">>> RECHARGE NVS : %d trame(s) prete(s). 2 appuis=rejeu brut, 3=via OpenProfalux <<<", count);
             } else {
-                /* ---- 4 APPUIS ou + : efface le journal NVS des trames ---- */
+                /* ---- 5 APPUIS ou + : efface le journal NVS des trames ---- */
                 clear_frames_nvs();
+                count = 0;
             }
             now = 1;                            /* relache */
         }
