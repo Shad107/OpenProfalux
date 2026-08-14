@@ -11,7 +11,7 @@ OpenProfalux prend un raccourci **validé au banc** :
 
 > **Le moteur accepte une trame rejouée.** Le compteur anti-rejeu n'est **pas** appliqué
 > par le récepteur : une trame capturée puis réémise fait bouger le volet, même après
-> usage de la vraie télécommande. Donc **aucune clé n'est nécessaire** — on **clone** une
+> usage de la vraie télécommande. Donc **aucune clé n'est nécessaire** : on **clone** une
 > télécommande existante par capture + rejeu.
 
 Concrètement : on capture les trames ▲ / ■ / ▼ d'une télécommande physique, on les nomme,
@@ -36,8 +36,8 @@ et on les rejoue à la demande depuis Home Assistant. C'est tout.
 | Composant | Réf | Coût |
 |-----------|-----|------|
 | ESP32 (M5Stack ATOM Lite ou DevKit) | ESP32-WROOM / PICO | ~5-12 € |
-| Module CC1101 868 MHz | EBYTE E07-900M10S, ELECHOUSE | ~3 € |
-| Antenne 868 MHz | — | ~2 € |
+| Module CC1101 868 MHz | petit module vert 868 (pastilles au pas de 2 mm, pas le 2.54) | ~3 € |
+| Antenne 868 MHz | fil 8.6 cm quart d'onde, ou hélicoïdale SMA | ~2 € |
 
 Fréquence mesurée : **868.425 MHz** OOK (cf. `docs/`). **CC1101 = 3.3 V max, jamais 5 V.**
 
@@ -59,4 +59,4 @@ Fréquence mesurée : **868.425 MHz** OOK (cf. `docs/`). **CC1101 = 3.3 V max, j
 ## Extensions possibles
 
 Même approche (capture + rejeu) potentiellement applicable à d'autres volets 868 MHz à
-rolling code non contraint (Delta Dore X2D, France Fermetures LIBRIO…) — non vérifié.
+rolling code non contraint (Delta Dore X2D, France Fermetures LIBRIO…), non vérifié.
