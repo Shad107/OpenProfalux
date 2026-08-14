@@ -141,7 +141,12 @@ progress::-webkit-progress-value{background:var(--accent)}
 .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%) translateY(20px);opacity:0;background:var(--text);color:var(--surface);padding:10px 18px;border-radius:999px;font-size:.86rem;font-weight:600;box-shadow:var(--shadow);transition:.2s;pointer-events:none;z-index:50}
 .toast.show{opacity:1;transform:translateX(-50%)}
 .hint{font-size:.78rem;color:var(--muted)}
-/* Apprentissage : slots de commande par volet */
+/* Apprentissage : selection du volet (chips) + slots de commande */
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{padding:8px 13px;border:1px solid var(--border);border-radius:999px;background:var(--surface-2);color:var(--text);font-size:.85rem;font-weight:600;cursor:pointer}
+.chip.on{border-color:var(--accent);background:var(--accent-weak);color:var(--accent)}
+.chip.add{color:var(--muted);font-weight:500}
+.chip.add.on{color:var(--accent);border-color:var(--accent)}
 .slots{display:flex;flex-direction:column;gap:8px;margin:14px 0 6px}
 .slot{display:flex;align-items:center;gap:12px;padding:11px 14px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2)}
 .slot.done{border-color:color-mix(in srgb,var(--ok) 45%,var(--border));background:color-mix(in srgb,var(--ok) 10%,var(--surface-2))}

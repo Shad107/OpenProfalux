@@ -50,11 +50,11 @@
         <div class="card">
           <h2>Apprendre un volet</h2>
           <p class="sub">Choisis un volet (ou crée-le), puis capture chaque commande depuis ta vraie télécommande. Une capture par commande suffit, elle est rejouable à vie.</p>
-          <div class="field"><label>Volet</label><input id="learn-id" list="volet-list" placeholder="Choisis un volet existant, ou tape un nouveau nom"></div>
-          <datalist id="volet-list"></datalist>
+          <div class="field"><label>Volet</label><div id="volet-picker" class="chips"></div></div>
+          <div class="field" id="new-volet-row" hidden><input id="new-volet" placeholder="Nom du nouveau volet"></div>
           <div class="field"><label>Nom de la télécommande (optionnel)</label><input id="cap-name" placeholder="ex : Murale chambre parents"></div>
           <div id="learn-slots" class="slots"></div>
-          <p class="hint" id="learn-hint">Renseigne un nom de volet pour activer la capture. Place-toi à moins d'un mètre du boîtier et appuie une fois sur le bon bouton.</p>
+          <p class="hint" id="learn-hint">Choisis un volet ci-dessus pour activer la capture. Place-toi à moins d'un mètre du boîtier et appuie une fois sur le bon bouton.</p>
         </div>
       </div>
 

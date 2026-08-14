@@ -63,10 +63,32 @@ const LEARN_ACTIONS = [
   { a: 'down', ico: '▼', lbl: 'Descente' },
 ];
 let learning = false;   // capture en cours
+let activeVolet = '';   // volet selectionne pour l'apprentissage
+
+function renderVoletPicker() {
+  const box = $('#volet-picker'); if (!box) return;
+  const ids = (statusCache.volets || []).map(v => v.id);
+  const nr = $('#new-volet-row');
+  const newOpen = nr && !nr.hidden;
+  if (activeVolet && !ids.includes(activeVolet) && !newOpen) activeVolet = '';
+  box.innerHTML = '';
+  for (const id of ids) {
+    const c = document.createElement('button');
+    c.className = 'chip' + (id === activeVolet ? ' on' : '');
+    c.textContent = '🪟 ' + id;
+    c.onclick = () => { activeVolet = id; if (nr) { nr.hidden = true; $('#new-volet').value = ''; } renderVoletPicker(); renderLearnSlots(); };
+    box.appendChild(c);
+  }
+  const add = document.createElement('button');
+  add.className = 'chip add' + (newOpen ? ' on' : '');
+  add.textContent = '+ Nouveau volet';
+  add.onclick = () => { if (!nr) return; nr.hidden = false; const inp = $('#new-volet'); inp.focus(); activeVolet = inp.value.trim(); renderVoletPicker(); renderLearnSlots(); };
+  box.appendChild(add);
+}
 
 function renderLearnSlots() {
   const box = $('#learn-slots'); if (!box) return;
-  const id = $('#learn-id') ? $('#learn-id').value.trim() : '';
+  const id = activeVolet;
   const v = (statusCache.volets || []).find(x => x.id === id);
   const cmd = (v && v.cmd) || {};
   box.innerHTML = '';
@@ -83,13 +105,13 @@ function renderLearnSlots() {
   box.querySelectorAll('.slot-btn').forEach(b => { b.disabled = !enabled; b.onclick = () => captureAction(b.dataset.a, b); });
   const hint = $('#learn-hint');
   if (hint) hint.textContent = id
-    ? 'Clique Capturer, puis appuie une fois sur le bouton correspondant de ta télécommande (< 1 m du boîtier).'
-    : 'Renseigne un nom de volet pour activer la capture.';
+    ? `Volet « ${id} » : clique Capturer, puis appuie une fois sur le bouton de ta télécommande (< 1 m du boîtier).`
+    : 'Choisis un volet ci-dessus (ou crée-en un) pour activer la capture.';
 }
 
 async function captureAction(action, btn) {
-  const id = $('#learn-id').value.trim();
-  if (!id) { toast('Donne d’abord un nom de volet'); return; }
+  const id = activeVolet;
+  if (!id) { toast('Choisis d’abord un volet'); return; }
   const label = LEARN_ACTIONS.find(x => x.a === action).lbl;
   learning = true; renderLearnSlots();
   btn.disabled = true; btn.textContent = `⏳ Appuie sur ${label}…`;
@@ -112,7 +134,8 @@ async function captureAction(action, btn) {
   }, 400);
 }
 
-if ($('#learn-id')) $('#learn-id').oninput = renderLearnSlots;
+const newVoletInput = $('#new-volet');
+if (newVoletInput) newVoletInput.oninput = () => { activeVolet = newVoletInput.value.trim(); renderLearnSlots(); };
 
 /* ── Télécommandes ── */
 function renderRemotes(map, rf) {
@@ -267,7 +290,7 @@ async function loadStatus() {
   const rf = s.rf || [];
   renderVolets(s.volets || [], rf);
   fillVoletPickers(s.volets || []);
-  if (!learning) renderLearnSlots();
+  if (!learning) { renderVoletPicker(); renderLearnSlots(); }
   wifiStatusLine(s.wifi); mqttStatusLine(s.mqtt);
   const tb = $('#rf'); if (tb) tb.innerHTML = rf.map(f =>
     `<tr><td class="m">${f.t}</td><td title="${esc(f.serial)}">${esc(remoteName(f.serial))}</td>
