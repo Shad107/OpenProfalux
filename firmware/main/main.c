@@ -311,7 +311,7 @@ void app_main(void) {
                 while (gpio_get_level(39) == 0) vTaskDelay(pdMS_TO_TICKS(15));  /* attend relachement */
                 taps++;
                 int waited = 0, again = 0;
-                while (waited < 450) {
+                while (waited < 700) {   /* fenetre elargie : compte 5 appuis fiablement */
                     vTaskDelay(pdMS_TO_TICKS(15)); waited += 15;
                     if (gpio_get_level(39) == 0) { again = 1; break; }
                 }
