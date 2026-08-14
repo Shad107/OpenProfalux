@@ -269,7 +269,7 @@ void app_main(void) {
      *                     vrai hop reversé) = preuve que OpenProfalux emet correctement
      *                     (framing byte-identique 7/7 offline).
      *   - 4 appuis      = RECHARGE les trames NVS dans le tableau (rejeu 2/3 sans re-capture, ex: apres coupure).
-     *   - 5 appuis      = TEST clair/hop : hopping de STOP + bouton clair force a une direction.
+     *   - 5 appuis      = TEST clair/hop : hopping d'une trame EMPX (ref, non rejouee) emis avec bouton clair derive (0x1, 0x2).
      *   - 6 appuis ou + = efface le journal NVS des trames (nouvelle campagne).
      * Chaque commande est aussi persistee en NVS (analyse ulterieure, redump au boot).
      * Rappel : le rejeu ne marche que si le moteur n'a PAS entendu la trame (rolling). */
@@ -362,25 +362,33 @@ void app_main(void) {
                 count = load_frames_nvs(capbuf, capbits, capgap, CAP_MAX);
                 ESP_LOGI(TAG, ">>> RECHARGE NVS : %d trame(s) prete(s). 2 appuis=rejeu brut, 3=via OpenProfalux <<<", count);
             } else if (taps == 5) {
-                /* ---- 5 APPUIS : TEST "clair ou hopping decide la direction ?" ----
-                 * Prend un hopping de STOP (btn clair 0x2) de l'EMPX (0x813) et l'emet
-                 * avec le bouton CLAIR force a 0x1 (une direction). Volet BOUGE => le
-                 * CLAIR decide (hopping = simple ticket). Volet STOP/rien => le HOPPING
-                 * (bouton chiffre) decide. Fais 4 appuis (recharge) d'abord. */
+                /* ---- 5 APPUIS : TEST "clair ou hopping decide ?" ----
+                 * REFERENCE = une trame EMPX (0x813) bouton 0x4. On NE la rejoue PAS :
+                 * on prend son HOPPING et on l'emet avec le bouton clair DERIVE vers
+                 * les autres commandes (0x1 puis 0x2), avec pause pour observer. Si le
+                 * volet suit le bouton clair => le CLAIR decide. EMPX SEULEMENT, jamais
+                 * la Noe globale (0x415560). Fais 4 appuis (recharge) d'abord. */
                 int fi = -1;
                 for (int i = 0; i < count; i++) {
                     uint32_t sr = 0; for (int b = 59; b >= 32; b--) sr = (sr << 1) | (capbuf[i][b]-'0');
                     int bb = 0;      for (int b = 60; b < 64; b++)  bb = (bb << 1) | (capbuf[i][b]-'0');
-                    if (sr == 0x813 && bb == 0x2) { fi = i; break; }
+                    if (sr == 0x813 && bb == 0x4) { fi = i; break; }   /* reference : EMPX bouton 0x4 */
                 }
-                if (fi < 0) { ESP_LOGW(TAG, ">>> TEST clair/hop : pas de trame STOP EMPX chargee (fais 4 appuis d'abord) <<<"); }
+                if (fi < 0) { ESP_LOGW(TAG, ">>> TEST : pas de trame EMPX (0x813) bouton 0x4 chargee (fais 4 appuis d'abord) <<<"); }
                 else {
                     uint32_t hop_true = 0; for (int b = 0; b < 32; b++) hop_true |= (uint32_t)(capbuf[fi][b]-'0') << b;
-                    uint8_t frame[9];
-                    pfx_frame_build_with_hop(hop_true, 0x813, 0x1, frame);  /* hopping de STOP + bouton clair=0x1 */
-                    ESP_LOGI(TAG, ">>> TEST clair/hop : hopping de STOP (#%d) + bouton CLAIR force a 0x1 <<<", fi);
-                    for (int k = 0; k < 5; k++) { cc1101_tx_ook_frame(frame, 66); vTaskDelay(pdMS_TO_TICKS(30)); }
-                    ESP_LOGI(TAG, "  -> Volet BOUGE = le CLAIR decide (hopping = ticket). STOP/rien = le HOPPING decide.");
+                    uint32_t hop_msb = 0;  for (int b = 0; b < 32; b++) hop_msb = (hop_msb << 1) | (capbuf[fi][b]-'0');
+                    ESP_LOGI(TAG, ">>> TEST clair/hop | REFERENCE (NON rejouee) : EMPX #%d serial=0x813 bouton_orig=0x4 hopping=0x%08X <<<",
+                             fi, (unsigned)hop_msb);
+                    uint8_t deriv[2] = { 0x1, 0x2 };
+                    for (int j = 0; j < 2; j++) {
+                        uint8_t frame[9];
+                        pfx_frame_build_with_hop(hop_true, 0x813, deriv[j], frame);  /* MEME hopping, bouton clair change */
+                        ESP_LOGI(TAG, "  -> DERIVATION : meme hopping + bouton clair 0x%X ... (regarde le volet)", deriv[j]);
+                        for (int k = 0; k < 6; k++) { cc1101_tx_ook_frame(frame, 66); vTaskDelay(pdMS_TO_TICKS(30)); }
+                        vTaskDelay(pdMS_TO_TICKS(3000));   /* pause pour observer entre 0x1 et 0x2 */
+                    }
+                    ESP_LOGI(TAG, "  Le volet a suivi 0x1 puis 0x2 (meme hopping) ? OUI = le CLAIR decide, secu cassee.");
                 }
             } else {
                 /* ---- 6 APPUIS ou + : efface le journal NVS des trames ---- */
