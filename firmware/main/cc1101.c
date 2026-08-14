@@ -342,7 +342,10 @@ int cc1101_rx_listen_bits(uint32_t timeout_ms, char *out_bits, int max_bits) {
      * On garde le 1er paquet avec header valide (>=64 bits) ; le bruit est ignore.
      * Reset propre du canal partage avant de commencer (reception pendante possible). */
     rmt_disable(s_cap); rmt_enable(s_cap); xQueueReset(s_capq);
-    rmt_receive_config_t rc = { .signal_range_min_ns = 3000, .signal_range_max_ns = 8000000 };
+    /* filtre anti-bruit : le vrai signal HCS300 a des impulsions >=455 us (Te). On
+     * ignore tout ce qui est < 200 us => le bruit OOK rapide est elimine avant de
+     * saturer le buffer, la trame reelle passe. */
+    rmt_receive_config_t rc = { .signal_range_min_ns = 200000, .signal_range_max_ns = 8000000 };
     int64_t t_end = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
     int r = -3;
     rmt_rx_done_event_data_t ev;
