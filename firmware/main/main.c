@@ -380,15 +380,16 @@ void app_main(void) {
                     uint32_t hop_msb = 0;  for (int b = 0; b < 32; b++) hop_msb = (hop_msb << 1) | (capbuf[fi][b]-'0');
                     ESP_LOGI(TAG, ">>> TEST clair/hop | REFERENCE (NON rejouee) : EMPX #%d serial=0x813 bouton_orig=0x4 hopping=0x%08X <<<",
                              fi, (unsigned)hop_msb);
-                    uint8_t deriv[2] = { 0x1, 0x2 };
-                    for (int j = 0; j < 2; j++) {
+                    uint8_t deriv[3] = { 0x1, 0x2, 0x4 };   /* tous les boutons trouves */
+                    for (int j = 0; j < 3; j++) {
                         uint8_t frame[9];
                         pfx_frame_build_with_hop(hop_true, 0x813, deriv[j], frame);  /* MEME hopping, bouton clair change */
-                        ESP_LOGI(TAG, "  -> DERIVATION : meme hopping + bouton clair 0x%X ... (regarde le volet)", deriv[j]);
-                        for (int k = 0; k < 6; k++) { cc1101_tx_ook_frame(frame, 66); vTaskDelay(pdMS_TO_TICKS(30)); }
-                        vTaskDelay(pdMS_TO_TICKS(3000));   /* pause pour observer entre 0x1 et 0x2 */
+                        ESP_LOGI(TAG, "  -> DERIVATION %d/3 : meme hopping + bouton clair 0x%X -- REGARDE LE VOLET", j + 1, deriv[j]);
+                        for (int k = 0; k < 8; k++) { cc1101_tx_ook_frame(frame, 66); vTaskDelay(pdMS_TO_TICKS(30)); }  /* ~1 s */
+                        ESP_LOGI(TAG, "     (emis. Pause 4 s pour observer avant la commande suivante...)");
+                        vTaskDelay(pdMS_TO_TICKS(4000));
                     }
-                    ESP_LOGI(TAG, "  Le volet a suivi 0x1 puis 0x2 (meme hopping) ? OUI = le CLAIR decide, secu cassee.");
+                    ESP_LOGI(TAG, "  Meme hopping, 3 boutons clairs differents : le volet a-t-il fait 3 choses ? OUI = le CLAIR decide.");
                 }
             } else {
                 /* ---- 6 APPUIS ou + : efface le journal NVS des trames ---- */
