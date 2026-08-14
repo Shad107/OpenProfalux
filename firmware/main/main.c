@@ -126,6 +126,29 @@ static int load_frames_nvs(char capbuf[][80], int *capbits, uint32_t *capgap, in
     return cnt;
 }
 
+/* Cherche dans NVS UNE trame (serial, bouton) et copie ses bits bruts dans out[80].
+ * Retourne 1 si trouvee. Sert au test clair/hop : une seule trame de reference. */
+static int find_frame_nvs(uint32_t want_serial, int want_btn, char *out) {
+    nvs_handle_t h;
+    if (nvs_open("caps", NVS_READONLY, &h) != ESP_OK) return 0;
+    uint16_t n = 0; nvs_get_u16(h, "n", &n);
+    int found = 0;
+    for (uint16_t i = 0; i < n && !found; i++) {
+        char key[8]; snprintf(key, sizeof(key), "c%u", (unsigned)i);
+        char val[96]; size_t sz = sizeof(val);
+        if (nvs_get_str(h, key, val, &sz) != ESP_OK) continue;
+        char *p = strchr(val, ' '); if (!p) continue;
+        p = strchr(p + 1, ' ');     if (!p) continue;
+        p++;
+        int nb = strlen(p); if (nb < 64) continue;
+        uint32_t sr = 0; for (int b = 59; b >= 32; b--) sr = (sr << 1) | (p[b]-'0');
+        int bb = 0;      for (int b = 60; b < 64; b++)  bb = (bb << 1) | (p[b]-'0');
+        if (sr == want_serial && bb == want_btn) { strncpy(out, p, 79); out[nb < 79 ? nb : 79] = '\0'; found = 1; }
+    }
+    nvs_close(h);
+    return found;
+}
+
 /* ────── MQTT handlers ────── */
 
 static void on_pair(const char *device) {
@@ -367,19 +390,15 @@ void app_main(void) {
                  * on prend son HOPPING et on l'emet avec le bouton clair DERIVE vers
                  * les autres commandes (0x1 puis 0x2), avec pause pour observer. Si le
                  * volet suit le bouton clair => le CLAIR decide. EMPX SEULEMENT, jamais
-                 * la Noe globale (0x415560). Fais 4 appuis (recharge) d'abord. */
-                int fi = -1;
-                for (int i = 0; i < count; i++) {
-                    uint32_t sr = 0; for (int b = 59; b >= 32; b--) sr = (sr << 1) | (capbuf[i][b]-'0');
-                    int bb = 0;      for (int b = 60; b < 64; b++)  bb = (bb << 1) | (capbuf[i][b]-'0');
-                    if (sr == 0x813 && bb == 0x4) { fi = i; break; }   /* reference : EMPX bouton 0x4 */
-                }
-                if (fi < 0) { ESP_LOGW(TAG, ">>> TEST : pas de trame EMPX (0x813) bouton 0x4 chargee (fais 4 appuis d'abord) <<<"); }
-                else {
-                    uint32_t hop_true = 0; for (int b = 0; b < 32; b++) hop_true |= (uint32_t)(capbuf[fi][b]-'0') << b;
-                    uint32_t hop_msb = 0;  for (int b = 0; b < 32; b++) hop_msb = (hop_msb << 1) | (capbuf[fi][b]-'0');
-                    ESP_LOGI(TAG, ">>> TEST clair/hop | REFERENCE (NON rejouee) : EMPX #%d serial=0x813 bouton_orig=0x4 hopping=0x%08X <<<",
-                             fi, (unsigned)hop_msb);
+                 * la Noe globale (0x415560). AUTONOME : va chercher la ref dans NVS. */
+                char ref[80];
+                if (!find_frame_nvs(0x813, 0x4, ref)) {
+                    ESP_LOGW(TAG, ">>> TEST : aucune trame EMPX (0x813) bouton 0x4 en NVS (capture-en une d'abord) <<<");
+                } else {
+                    uint32_t hop_true = 0; for (int b = 0; b < 32; b++) hop_true |= (uint32_t)(ref[b]-'0') << b;
+                    uint32_t hop_msb = 0;  for (int b = 0; b < 32; b++) hop_msb = (hop_msb << 1) | (ref[b]-'0');
+                    ESP_LOGI(TAG, ">>> TEST clair/hop | REFERENCE (NON rejouee) : EMPX 0x813 bouton_orig 0x4 hopping=0x%08X <<<",
+                             (unsigned)hop_msb);
                     uint8_t deriv[3] = { 0x1, 0x2, 0x4 };   /* tous les boutons trouves */
                     for (int j = 0; j < 3; j++) {
                         uint8_t frame[9];
