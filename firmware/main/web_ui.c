@@ -62,7 +62,7 @@ static void learn_task(void *arg) {
         s_lbtn    = (uint8_t)bits_lsb(bits, 60, 4);
         s_lready  = true;
         /* fait aussi apparaitre la trame captee dans le journal RF debug */
-        shutters_on_rx(s_lserial, s_lbtn, s_lrssi, bits_lsb(bits, 0, 32));
+        shutters_on_rx(bits, s_lserial, s_lbtn, s_lrssi, bits_lsb(bits, 0, 32));
     }
     s_lactive = false;
     vTaskDelete(NULL);
@@ -162,6 +162,17 @@ static esp_err_t h_learn_reassign(httpd_req_t *r) {
     cJSON *j = cJSON_Parse(body); free(body);
     if (!j) return httpd_resp_send_err(r, 400, "json");
     int rc = shutters_reassign(jstr(j, "id"), jstr(j, "from"), jstr(j, "to"));
+    cJSON_Delete(j);
+    httpd_resp_sendstr(r, rc == 0 ? "{\"ok\":1}" : "{\"ok\":0}");
+    return ESP_OK;
+}
+static esp_err_t h_learn_adopt(httpd_req_t *r) {
+    char *body = read_body(r); if (!body) return httpd_resp_send_err(r, 400, "body");
+    cJSON *j = cJSON_Parse(body); free(body);
+    if (!j) return httpd_resp_send_err(r, 400, "json");
+    const char *hs = jstr(j, "hop");
+    uint32_t hop = hs ? (uint32_t)strtoul(hs, NULL, 16) : 0;
+    int rc = shutters_adopt(jstr(j, "id"), jstr(j, "action"), jstr(j, "serial"), hop);
     cJSON_Delete(j);
     httpd_resp_sendstr(r, rc == 0 ? "{\"ok\":1}" : "{\"ok\":0}");
     return ESP_OK;
@@ -361,6 +372,7 @@ void web_ui_start(void) {
     reg(s, "/api/learn/poll",   HTTP_GET,  h_learn_poll);
     reg(s, "/api/learn/assign", HTTP_POST, h_learn_assign);
     reg(s, "/api/learn/reassign", HTTP_POST, h_learn_reassign);
+    reg(s, "/api/learn/adopt", HTTP_POST, h_learn_adopt);
     reg(s, "/api/calibrate", HTTP_POST, h_calibrate);
     reg(s, "/api/remote",    HTTP_POST, h_remote);
     reg(s, "/api/config",    HTTP_GET,  h_config_get);

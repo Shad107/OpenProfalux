@@ -33,7 +33,9 @@ int  shutters_calibrate(const char *id, uint32_t up_ms, uint32_t down_ms);
 int  shutters_remote_name(const char *serial, const char *name);
 
 /* Appele par le sniff RX : met a jour la position si une commande externe bouge un volet. */
-void shutters_on_rx(uint32_t serial, uint8_t button, int8_t rssi, uint32_t hop);
+void shutters_on_rx(const char *bits, uint32_t serial, uint8_t button, int8_t rssi, uint32_t hop);
+/* Adopte une trame vue dans le journal RF (identifiee par serial+hop) et l'affecte a une action. */
+int  shutters_adopt(const char *id, const char *action, const char *serial, uint32_t hop);
 
 /* Produit le JSON /api/status dans buf (taille cap). Retourne la longueur. */
 int  shutters_status_json(char *buf, int cap);

@@ -50,7 +50,8 @@ typedef struct {
     uint16_t  caphops;       /* capacite allouee du set */
 } remote_t;
 
-typedef struct { uint32_t t; char serial[SH_SERIAL_LEN]; uint8_t button; uint32_t hop; int8_t rssi; } rfrec_t;
+typedef struct { uint32_t t; char serial[SH_SERIAL_LEN]; uint8_t button; uint32_t hop; int8_t rssi;
+                 char bits[SH_BITS_LEN]; } rfrec_t;   /* bits = trame complete rejouable (pour adoption) */
 
 static volet_t  s_volets[SH_MAX_VOLETS];
 static int      s_nvolets = 0;
@@ -375,6 +376,19 @@ int shutters_reassign(const char *id, const char *from, const char *to) {
     return 0;
 }
 
+int shutters_adopt(const char *id, const char *action, const char *serial, uint32_t hop) {
+    if (!id || !action || !serial) return -1;
+    char bits[SH_BITS_LEN] = {0};
+    LOCK();
+    for (int k = 0; k < 12; k++) {
+        rfrec_t *r = &s_rf[k];
+        if (r->bits[0] && !strcmp(r->serial, serial) && r->hop == hop) { strlcpy(bits, r->bits, SH_BITS_LEN); break; }
+    }
+    UNLOCK();
+    if (!bits[0]) return -1;
+    return shutters_learn_assign(id, action, bits);   /* prend son propre LOCK */
+}
+
 int shutters_calibrate(const char *id, uint32_t up_ms, uint32_t down_ms) {
     LOCK();
     volet_t *v = find_volet(id);
@@ -462,14 +476,15 @@ static void track_shutter_position(const char *shex, uint8_t button) {
 }
 
 /* ── RX : chaque trame recue -> journal + les 2 fonctions ci-dessus ── */
-void shutters_on_rx(uint32_t serial, uint8_t button, int8_t rssi, uint32_t hop) {
+void shutters_on_rx(const char *bits, uint32_t serial, uint8_t button, int8_t rssi, uint32_t hop) {
     ESP_LOGI(TAG, "RX serial=0x%07X bouton=0x%X hop=0x%08X rssi=%d dBm",
              (unsigned)serial, button, (unsigned)hop, rssi);
     LOCK();
-    /* journal RF pour le monitor UI */
+    /* journal RF pour le monitor UI (+ trame complete rejouable pour l'adoption) */
     rfrec_t *r = &s_rf[s_rfhead];
     r->t = (uint32_t)(esp_timer_get_time() / 1000000); r->button = button; r->hop = hop; r->rssi = rssi;
     snprintf(r->serial, SH_SERIAL_LEN, "0x%07X", (unsigned)serial);
+    strlcpy(r->bits, bits ? bits : "", SH_BITS_LEN);
     s_rfhead = (s_rfhead + 1) % 12;
     /* auto-enregistre le serial vu (nom vide) */
     char shex[SH_SERIAL_LEN]; snprintf(shex, sizeof(shex), "0x%07X", (unsigned)serial);
@@ -634,8 +649,7 @@ void shutters_set_log_frames(bool on) {
 
 /* Dispatch d'une trame recue par la tache radio -> sync position + frame-log. */
 static void on_air(const char *bits, uint32_t serial, uint8_t button, uint32_t hop, int8_t rssi) {
-    (void)bits;
-    shutters_on_rx(serial, button, rssi, hop);
+    shutters_on_rx(bits, serial, button, rssi, hop);
 }
 
 void shutters_init(void) {
