@@ -22,3 +22,11 @@ firmware/main/*.o
 *.env
 secrets.h
 *.kate-swp
+
+# Firmware capture/test (banc)
+firmware-capture-test/build/
+firmware-capture-test/managed_components/
+firmware-capture-test/dependencies.lock
+firmware-capture-test/sdkconfig
+firmware-capture-test/sdkconfig.old
+firmware-capture-test/main/*.o
