@@ -19,6 +19,8 @@
 #include "radio.h"
 #include "hardware_config.h"
 #include "mqtt_bridge.h"
+#include "esp_wifi.h"
+#include "esp_netif.h"
 
 static const char *TAG = "shutters";
 #define TICK_MS 150
@@ -450,6 +452,23 @@ int shutters_status_json(char *buf, int cap) {
         cJSON_AddItemToArray(rf, f);
     }
     UNLOCK();
+    /* Statut Wi-Fi + MQTT (pour l'UI : pastilles + force du signal) */
+    cJSON *wifi = cJSON_AddObjectToObject(root, "wifi");
+    wifi_ap_record_t ap;
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+        cJSON_AddBoolToObject(wifi, "connected", true);
+        cJSON_AddStringToObject(wifi, "ssid", (char *)ap.ssid);
+        cJSON_AddNumberToObject(wifi, "rssi", ap.rssi);
+        esp_netif_t *nif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+        esp_netif_ip_info_t ip;
+        if (nif && esp_netif_get_ip_info(nif, &ip) == ESP_OK && ip.ip.addr) {
+            char ips[16]; snprintf(ips, sizeof(ips), IPSTR, IP2STR(&ip.ip));
+            cJSON_AddStringToObject(wifi, "ip", ips);
+        }
+    } else {
+        cJSON_AddBoolToObject(wifi, "connected", false);
+    }
+    cJSON_AddBoolToObject(root, "mqtt", s_mqtt_ready);
     char *js = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     int n = 0;
