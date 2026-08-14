@@ -252,7 +252,7 @@ void app_main(void) {
      * appui sur le bouton integre de l'ATOM Lite (GPIO39) -> burst d'appairage. */
     gpio_config_t btn = { .pin_bit_mask = 1ULL << 39, .mode = GPIO_MODE_INPUT };
     gpio_config(&btn);
-    ESP_LOGI(TAG, "PRET. Bouton G39 : 1=ENREGISTRE | 2=rejeu BRUT | 3=via OpenProfalux | 4=RECHARGE NVS | 5+=efface NVS.");
+    ESP_LOGI(TAG, "PRET. Bouton G39 : 1=ENREGISTRE | 2=rejeu BRUT | 3=via OpenProfalux | 4=RECHARGE | 5=TEST clair/hop | 6+=efface.");
 
     /* Bouton ATOM (G39) :
      *   - appui LONG (>1,5 s) = ENROLEMENT (burst bouton PROG 0x8)
@@ -269,7 +269,8 @@ void app_main(void) {
      *                     vrai hop reversé) = preuve que OpenProfalux emet correctement
      *                     (framing byte-identique 7/7 offline).
      *   - 4 appuis      = RECHARGE les trames NVS dans le tableau (rejeu 2/3 sans re-capture, ex: apres coupure).
-     *   - 5 appuis ou + = efface le journal NVS des trames (nouvelle campagne).
+     *   - 5 appuis      = TEST clair/hop : hopping de STOP + bouton clair force a une direction.
+     *   - 6 appuis ou + = efface le journal NVS des trames (nouvelle campagne).
      * Chaque commande est aussi persistee en NVS (analyse ulterieure, redump au boot).
      * Rappel : le rejeu ne marche que si le moteur n'a PAS entendu la trame (rolling). */
     #define CAP_MAX 16
@@ -360,8 +361,29 @@ void app_main(void) {
                 /* ---- 4 APPUIS : RECHARGE les trames NVS dans le tableau de rejeu ---- */
                 count = load_frames_nvs(capbuf, capbits, capgap, CAP_MAX);
                 ESP_LOGI(TAG, ">>> RECHARGE NVS : %d trame(s) prete(s). 2 appuis=rejeu brut, 3=via OpenProfalux <<<", count);
+            } else if (taps == 5) {
+                /* ---- 5 APPUIS : TEST "clair ou hopping decide la direction ?" ----
+                 * Prend un hopping de STOP (btn clair 0x2) de l'EMPX (0x813) et l'emet
+                 * avec le bouton CLAIR force a 0x1 (une direction). Volet BOUGE => le
+                 * CLAIR decide (hopping = simple ticket). Volet STOP/rien => le HOPPING
+                 * (bouton chiffre) decide. Fais 4 appuis (recharge) d'abord. */
+                int fi = -1;
+                for (int i = 0; i < count; i++) {
+                    uint32_t sr = 0; for (int b = 59; b >= 32; b--) sr = (sr << 1) | (capbuf[i][b]-'0');
+                    int bb = 0;      for (int b = 60; b < 64; b++)  bb = (bb << 1) | (capbuf[i][b]-'0');
+                    if (sr == 0x813 && bb == 0x2) { fi = i; break; }
+                }
+                if (fi < 0) { ESP_LOGW(TAG, ">>> TEST clair/hop : pas de trame STOP EMPX chargee (fais 4 appuis d'abord) <<<"); }
+                else {
+                    uint32_t hop_true = 0; for (int b = 0; b < 32; b++) hop_true |= (uint32_t)(capbuf[fi][b]-'0') << b;
+                    uint8_t frame[9];
+                    pfx_frame_build_with_hop(hop_true, 0x813, 0x1, frame);  /* hopping de STOP + bouton clair=0x1 */
+                    ESP_LOGI(TAG, ">>> TEST clair/hop : hopping de STOP (#%d) + bouton CLAIR force a 0x1 <<<", fi);
+                    for (int k = 0; k < 5; k++) { cc1101_tx_ook_frame(frame, 66); vTaskDelay(pdMS_TO_TICKS(30)); }
+                    ESP_LOGI(TAG, "  -> Volet BOUGE = le CLAIR decide (hopping = ticket). STOP/rien = le HOPPING decide.");
+                }
             } else {
-                /* ---- 5 APPUIS ou + : efface le journal NVS des trames ---- */
+                /* ---- 6 APPUIS ou + : efface le journal NVS des trames ---- */
                 clear_frames_nvs();
                 count = 0;
             }
