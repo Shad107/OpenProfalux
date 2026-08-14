@@ -10,6 +10,7 @@ static const char *TAG = "mqtt";
 static esp_mqtt_client_handle_t s_mqtt = NULL;
 static mqtt_handlers_t          s_hdl = {0};
 static char s_client_id[32];
+static char s_avail_topic[64];   /* topic de disponibilite HA (LWT) : openprofalux/<device>/status */
 
 /* Topic base — set at start */
 #define TOPIC_BASE "openprofalux"
@@ -78,6 +79,7 @@ static void mqtt_event_cb(void *arg, esp_event_base_t base, int32_t id, void *ev
     switch (evt->event_id) {
         case MQTT_EVENT_CONNECTED:
             ESP_LOGI(TAG, "Connected to broker");
+            esp_mqtt_client_publish(s_mqtt, s_avail_topic, "online", 0, 1, 1);   /* disponibilite HA */
             esp_mqtt_client_subscribe(s_mqtt, TOPIC_BASE "/+/pair", 1);
             esp_mqtt_client_subscribe(s_mqtt, TOPIC_BASE "/+/reset", 1);
             esp_mqtt_client_subscribe(s_mqtt, TOPIC_BASE "/+/cmd", 1);
@@ -100,11 +102,19 @@ static void mqtt_event_cb(void *arg, esp_event_base_t base, int32_t id, void *ev
 
 int mqtt_bridge_start(const char *broker_uri, const char *client_id, const char *user, const char *pass) {
     strncpy(s_client_id, client_id, sizeof(s_client_id) - 1);
+    snprintf(s_avail_topic, sizeof(s_avail_topic), TOPIC_BASE "/%s/status", client_id);
     esp_mqtt_client_config_t cfg = {
         .broker.address.uri = broker_uri,
         .credentials.client_id = client_id,
         .credentials.username = user,
         .credentials.authentication.password = pass,
+        /* Last Will : le broker publie "offline" (retain) si le boitier tombe sans se
+         * deconnecter proprement -> HA grise les entites. On republie "online" a la connexion. */
+        .session.last_will.topic = s_avail_topic,
+        .session.last_will.msg = "offline",
+        .session.last_will.msg_len = 7,
+        .session.last_will.qos = 1,
+        .session.last_will.retain = 1,
     };
     s_mqtt = esp_mqtt_client_init(&cfg);
     esp_mqtt_client_register_event(s_mqtt, ESP_EVENT_ANY_ID, mqtt_event_cb, NULL);

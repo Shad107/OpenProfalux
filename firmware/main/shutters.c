@@ -234,10 +234,19 @@ static void publish_volet_state(volet_t *v) {
 /* Publie la config HA discovery d'un cover (retained). Appele sous LOCK. */
 static void announce_one(volet_t *v) {
     if (!s_mqtt_ready) return;
-    char topic[128], *pl = malloc(768);
+    char topic[128], *pl = malloc(900);
     if (!pl) return;
+    /* configuration_url = UI web du boitier (via son IP) pour "Visiter l'appareil" dans HA ;
+     * repli sur la page projet si l'IP n'est pas connue. */
+    char cu[52];
+    esp_netif_t *nif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_ip_info_t ip;
+    if (nif && esp_netif_get_ip_info(nif, &ip) == ESP_OK && ip.ip.addr)
+        snprintf(cu, sizeof(cu), "http://" IPSTR, IP2STR(&ip.ip));
+    else
+        strlcpy(cu, "https://www.isno.fr/projets/openprofalux", sizeof(cu));
     snprintf(topic, sizeof(topic), "homeassistant/cover/openprofalux_%s_%s/config", s_device, v->id);
-    snprintf(pl, 768,
+    snprintf(pl, 900,
         "{\"name\":\"%s\",\"uniq_id\":\"opfx_%s_%s\",\"dev_cla\":\"shutter\","
         "\"cmd_t\":\"openprofalux/cover/%s/set\","
         "\"pl_open\":\"OPEN\",\"pl_cls\":\"CLOSE\",\"pl_stop\":\"STOP\","
@@ -245,10 +254,10 @@ static void announce_one(volet_t *v) {
         "\"set_pos_t\":\"openprofalux/cover/%s/set_position\","
         "\"pos_open\":100,\"pos_clsd\":0,"
         "\"stat_t\":\"openprofalux/cover/%s/state\","
+        "\"avty_t\":\"openprofalux/%s/status\",\"pl_avail\":\"online\",\"pl_not_avail\":\"offline\","
         "\"dev\":{\"ids\":[\"openprofalux_%s\"],\"name\":\"OpenProfalux %s\","
-        "\"mf\":\"isno.fr\",\"mdl\":\"ESP32+CC1101\","
-        "\"cu\":\"https://www.isno.fr/projets/openprofalux\"}}",
-        v->id, s_device, v->id, v->id, v->id, v->id, v->id, s_device, s_device);
+        "\"mf\":\"isno.fr\",\"mdl\":\"ESP32+CC1101\",\"cu\":\"%s\"}}",
+        v->id, s_device, v->id, v->id, v->id, v->id, v->id, s_device, s_device, s_device, cu);
     mqtt_pub_raw(topic, pl, 1, 1);
     free(pl);
     publish_volet_state(v);
