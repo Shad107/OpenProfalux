@@ -34,8 +34,6 @@
   <button class="tab" data-t="wifi"><span>📶</span>Wi-Fi</button>
   <button class="tab" data-t="mqtt"><span>📡</span>MQTT</button>
   <button class="tab" data-t="sys"><span>⚙️</span>Système</button>
-  <button class="tab" data-t="ota"><span>⬆️</span>OTA</button>
-  <button class="tab" data-t="backup"><span>💾</span>Sauvegarde</button>
 </nav>
 
 <main>
@@ -134,40 +132,46 @@
     </div>
   </section>
 
-  <!-- Système -->
+  <!-- Système (sous-onglets Appareil / OTA / Sauvegarde) -->
   <section class="panel" data-p="sys">
-    <div class="card">
-      <h2>Appareil</h2>
-      <div class="field" style="margin-top:12px"><label>Nom de l'appareil</label><input id="sys-device" placeholder="openprofalux"></div>
-      <label class="switch"><input type="checkbox" id="sys-logframes"><span class="track"></span>
-        <span class="lbl">Journaliser toutes les trames en MQTT<small>Écoute RF permanente · redémarrage requis</small></span></label>
-      <label class="switch"><input type="checkbox" id="sys-reboot"><span class="track"></span>
-        <span class="lbl">Redémarrer après enregistrement</span></label>
-      <div class="row end"><button id="sys-save" class="btn primary">Enregistrer</button></div>
-    </div>
-  </section>
+    <nav class="subtabs" id="systabs">
+      <button class="subtab active" data-s="device">Appareil</button>
+      <button class="subtab" data-s="ota">OTA</button>
+      <button class="subtab" data-s="backup">Sauvegarde</button>
+    </nav>
 
-  <!-- OTA -->
-  <section class="panel" data-p="ota">
-    <div class="card">
-      <h2>Mise à jour (OTA)</h2>
-      <p class="sub">Version courante : <code id="ota-version">—</code></p>
-      <div class="field"><label>Fichier firmware (.bin)</label><input type="file" id="ota-file" accept=".bin"></div>
-      <div class="row"><button id="ota-btn" class="btn primary">Flasher</button><button id="ota-rollback" class="btn danger">↩ Version précédente</button></div>
-      <div id="ota-prog" hidden style="margin-top:12px"><progress id="ota-bar" max="100" value="0"></progress> <span class="hint" id="ota-msg"></span></div>
-      <p class="hint" style="margin-top:12px">Écrit sur la partition inactive ; rollback automatique si le démarrage échoue.</p>
+    <div class="subpanel active" data-sp="device">
+      <div class="card">
+        <h2>Appareil</h2>
+        <div class="field" style="margin-top:12px"><label>Nom de l'appareil</label><input id="sys-device" placeholder="openprofalux"></div>
+        <label class="switch"><input type="checkbox" id="sys-logframes"><span class="track"></span>
+          <span class="lbl">Journaliser toutes les trames en MQTT<small>Écoute RF permanente · redémarrage requis</small></span></label>
+        <label class="switch"><input type="checkbox" id="sys-reboot"><span class="track"></span>
+          <span class="lbl">Redémarrer après enregistrement</span></label>
+        <div class="row end"><button id="sys-save" class="btn primary">Enregistrer</button></div>
+      </div>
     </div>
-  </section>
 
-  <!-- Sauvegarde -->
-  <section class="panel" data-p="backup">
-    <div class="card">
-      <h2>Sauvegarde</h2>
-      <p class="sub">Télécommandes, trames de référence et calibration. À garder hors de l'ESP32 pour tout restaurer après un reset.</p>
-      <div class="row"><a id="backup-dl" class="btn primary" href="/api/backup" download="openprofalux-backup.json">⬇ Télécharger</a></div>
-      <h3>Restaurer</h3>
-      <div class="field"><input type="file" id="restore-file" accept=".json,application/json"></div>
-      <div class="row"><button id="restore-btn" class="btn">Restaurer (remplace la config actuelle)</button></div>
+    <div class="subpanel" data-sp="ota">
+      <div class="card">
+        <h2>Mise à jour (OTA)</h2>
+        <p class="sub">Version courante : <code id="ota-version">—</code></p>
+        <div class="field"><label>Fichier firmware (.bin)</label><input type="file" id="ota-file" accept=".bin"></div>
+        <div class="row"><button id="ota-btn" class="btn primary">Flasher</button><button id="ota-rollback" class="btn danger">↩ Version précédente</button></div>
+        <div id="ota-prog" hidden style="margin-top:12px"><progress id="ota-bar" max="100" value="0"></progress> <span class="hint" id="ota-msg"></span></div>
+        <p class="hint" style="margin-top:12px">Écrit sur la partition inactive ; rollback automatique si le démarrage échoue.</p>
+      </div>
+    </div>
+
+    <div class="subpanel" data-sp="backup">
+      <div class="card">
+        <h2>Sauvegarde</h2>
+        <p class="sub">Télécommandes, trames de référence et calibration. À garder hors de l'ESP32 pour tout restaurer après un reset.</p>
+        <div class="row"><a id="backup-dl" class="btn primary" href="/api/backup" download="openprofalux-backup.json">⬇ Télécharger</a></div>
+        <h3>Restaurer</h3>
+        <div class="field"><input type="file" id="restore-file" accept=".json,application/json"></div>
+        <div class="row"><button id="restore-btn" class="btn">Restaurer (remplace la config actuelle)</button></div>
+      </div>
     </div>
   </section>
 </main>

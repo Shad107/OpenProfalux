@@ -8,7 +8,12 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '
 $$('.tab').forEach(t => t.onclick = () => {
   $$('.tab').forEach(x => x.classList.toggle('active', x === t));
   $$('.panel').forEach(p => p.classList.toggle('active', p.dataset.p === t.dataset.t));
-  if (['wifi', 'mqtt', 'sys', 'ota'].includes(t.dataset.t)) loadConfig();
+  if (['wifi', 'mqtt', 'sys'].includes(t.dataset.t)) loadConfig();
+});
+/* Sous-onglets (Systeme : Appareil / OTA / Sauvegarde) */
+$$('#systabs .subtab').forEach(t => t.onclick = () => {
+  $$('#systabs .subtab').forEach(x => x.classList.toggle('active', x === t));
+  $$('[data-sp]').forEach(p => p.classList.toggle('active', p.dataset.sp === t.dataset.s));
 });
 $('#theme').onclick = () => {
   const r = document.documentElement;
