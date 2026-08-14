@@ -549,6 +549,7 @@ int shutters_status_json(char *buf, int cap) {
         cJSON_AddBoolToObject(wifi, "connected", false);
     }
     cJSON_AddBoolToObject(root, "mqtt", s_mqtt_ready);
+    cJSON_AddBoolToObject(root, "listening", s_log_frames);   /* ecoute permanente = position fiable */
     char *js = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     int n = 0;

@@ -36,14 +36,18 @@ function rssiForSerials(serials, rf) { for (const f of rf) if ((serials || []).i
 function renderVolets(list, rf) {
   const box = $('#volets'); box.innerHTML = '';
   $('#control-empty').hidden = list.length > 0;
+  /* Position affichee UNIQUEMENT si l'ecoute permanente est active : sinon un coup de
+   * vraie telecommande desynchronise l'estimation (pas de retour moteur) et un % faux
+   * est pire qu'aucun %. */
+  const showPos = !!statusCache.listening;
   for (const v of list) {
     const r = rssiForSerials(v.serials, rf);
     const el = document.createElement('div');
     el.className = 'card volet';
     el.innerHTML = `
-      <div class="top"><span class="name">🪟 ${esc(v.id)}</span><span class="pct">${v.position ?? '?'}%</span></div>
+      <div class="top"><span class="name">🪟 ${esc(v.id)}</span>${showPos ? `<span class="pct">${v.position ?? '?'}%</span>` : ''}</div>
       <div class="dpad"><button data-cmd="up">▲</button><button data-cmd="stop">■</button><button data-cmd="down">▼</button></div>
-      <div class="slat" style="--p:${v.position ?? 50}"></div>
+      ${showPos ? `<div class="slat" style="--p:${v.position ?? 50}"></div>` : ''}
       <div class="serials">serials : ${(v.serials || []).map(s => `<code>${esc(remoteName(s))}</code>`).join(' ') || 'aucun'}
         ${r != null ? `<span style="margin-left:6px">· reçu ${sig(r)}</span>` : ''}</div>`;
     el.querySelectorAll('[data-cmd]').forEach(b =>
@@ -52,7 +56,8 @@ function renderVolets(list, rf) {
         const m = r && r.tx_marc;
         if (m != null && m >= 0 && m !== 0x13) toast(`${b.dataset.cmd} : TX MARCSTATE=0x${m.toString(16).toUpperCase()} (attendu 0x13, émission KO ?)`);
       });
-    el.querySelector('.slat').onclick = e => {
+    const slat = el.querySelector('.slat');
+    if (slat) slat.onclick = e => {
       const p = Math.round(100 * (e.offsetX / e.currentTarget.offsetWidth));
       api('/api/shutter', { method: 'POST', body: JSON.stringify({ id: v.id, cmd: 'pos', value: p }) });
     };
