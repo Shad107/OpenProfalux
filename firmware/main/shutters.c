@@ -223,9 +223,11 @@ static void ha_state_str(const volet_t *v, char *out) {
 static void publish_volet_state(volet_t *v) {
     if (!s_mqtt_ready) return;
     char topic[96], pl[16], st[10];
-    snprintf(topic, sizeof(topic), "openprofalux/cover/%s/position", v->id);
-    snprintf(pl, sizeof(pl), "%d", (int)(v->position + 0.5f));
-    mqtt_pub_raw(topic, pl, 0, 1);
+    if (s_log_frames) {   /* position publiee seulement si suivi actif (coherent avec la decouverte + l'UI) */
+        snprintf(topic, sizeof(topic), "openprofalux/cover/%s/position", v->id);
+        snprintf(pl, sizeof(pl), "%d", (int)(v->position + 0.5f));
+        mqtt_pub_raw(topic, pl, 0, 1);
+    }
     ha_state_str(v, st);
     snprintf(topic, sizeof(topic), "openprofalux/cover/%s/state", v->id);
     mqtt_pub_raw(topic, st, 0, 1);
@@ -245,19 +247,26 @@ static void announce_one(volet_t *v) {
         snprintf(cu, sizeof(cu), "http://" IPSTR, IP2STR(&ip.ip));
     else
         strlcpy(cu, "https://www.isno.fr/projets/openprofalux", sizeof(cu));
+    /* Position exposee a HA UNIQUEMENT si l'ecoute permanente est active (comme dans l'UI web) :
+     * sinon un coup de vraie telecommande desynchronise l'estimation, un % faux est pire qu'aucun.
+     * Sans l'option, le cover reste pilotable (ouvrir/fermer/stop) mais sans position. */
+    char pos[200] = "";
+    if (s_log_frames)
+        snprintf(pos, sizeof(pos),
+            "\"pos_t\":\"openprofalux/cover/%s/position\","
+            "\"set_pos_t\":\"openprofalux/cover/%s/set_position\","
+            "\"pos_open\":100,\"pos_clsd\":0,", v->id, v->id);
     snprintf(topic, sizeof(topic), "homeassistant/cover/openprofalux_%s_%s/config", s_device, v->id);
     snprintf(pl, 900,
         "{\"name\":\"%s\",\"uniq_id\":\"opfx_%s_%s\",\"dev_cla\":\"shutter\","
         "\"cmd_t\":\"openprofalux/cover/%s/set\","
         "\"pl_open\":\"OPEN\",\"pl_cls\":\"CLOSE\",\"pl_stop\":\"STOP\","
-        "\"pos_t\":\"openprofalux/cover/%s/position\","
-        "\"set_pos_t\":\"openprofalux/cover/%s/set_position\","
-        "\"pos_open\":100,\"pos_clsd\":0,"
+        "%s"
         "\"stat_t\":\"openprofalux/cover/%s/state\","
         "\"avty_t\":\"openprofalux/%s/status\",\"pl_avail\":\"online\",\"pl_not_avail\":\"offline\","
         "\"dev\":{\"ids\":[\"openprofalux_%s\"],\"name\":\"OpenProfalux %s\","
         "\"mf\":\"isno.fr\",\"mdl\":\"ESP32+CC1101\",\"cu\":\"%s\"}}",
-        v->id, s_device, v->id, v->id, v->id, v->id, v->id, s_device, s_device, s_device, cu);
+        v->id, s_device, v->id, v->id, pos, v->id, s_device, s_device, s_device, cu);
     mqtt_pub_raw(topic, pl, 1, 1);
     free(pl);
     publish_volet_state(v);
@@ -652,7 +661,10 @@ static void update_listening(void) {
 void shutters_set_log_frames(bool on) {
     s_log_frames = on;
     update_listening();
-    if (on) { LOCK(); flush_frame_ring_locked(); UNLOCK(); }   /* si MQTT deja connecte : rattrape le ring tout de suite */
+    LOCK();
+    if (on) flush_frame_ring_locked();                 /* si MQTT deja connecte : rattrape le ring tout de suite */
+    for (int i = 0; i < s_nvolets; i++) announce_one(&s_volets[i]);   /* re-publie la decouverte : position apparait/disparait selon l'option */
+    UNLOCK();
     ESP_LOGI(TAG, "log_frames=%d", on);
 }
 
