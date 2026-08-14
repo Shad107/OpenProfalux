@@ -8,12 +8,14 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '
 $$('.tab').forEach(t => t.onclick = () => {
   $$('.tab').forEach(x => x.classList.toggle('active', x === t));
   $$('.panel').forEach(p => p.classList.toggle('active', p.dataset.p === t.dataset.t));
-  if (['wifi', 'mqtt', 'sys'].includes(t.dataset.t)) loadConfig();
+  if (t.dataset.t === 'sys') loadConfig();
 });
-/* Sous-onglets (Systeme : Appareil / OTA / Sauvegarde) */
-$$('#systabs .subtab').forEach(t => t.onclick = () => {
-  $$('#systabs .subtab').forEach(x => x.classList.toggle('active', x === t));
-  $$('[data-sp]').forEach(p => p.classList.toggle('active', p.dataset.sp === t.dataset.s));
+/* Sous-onglets (generique, scope au panneau parent) */
+$$('.subtab').forEach(t => t.onclick = () => {
+  const sec = t.closest('.panel');
+  $$('.subtab', sec).forEach(x => x.classList.toggle('active', x === t));
+  $$('.subpanel', sec).forEach(p => p.classList.toggle('active', p.dataset.sp === t.dataset.s));
+  if (['wifi', 'mqtt', 'ota'].includes(t.dataset.s)) loadConfig();
 });
 $('#theme').onclick = () => {
   const r = document.documentElement;
@@ -184,9 +186,11 @@ $('#restore-btn').onclick = async () => {
 
 /* ── Statut global (polling) ── */
 let statusCache = { volets: [], rf: [], remotes: {} };
-function setPill(id, on, label) {
-  const p = $(id); p.classList.toggle('on', !!on); p.classList.toggle('off', !on);
-  p.lastChild.textContent = label;
+function fillVoletPickers(volets) {
+  const ids = (volets || []).map(v => v.id);
+  const sel = $('#calib-id');
+  if (sel) { const cur = sel.value; sel.innerHTML = ids.map(id => `<option>${esc(id)}</option>`).join(''); if (ids.includes(cur)) sel.value = cur; }
+  const dl = $('#volet-list'); if (dl) dl.innerHTML = ids.map(id => `<option value="${esc(id)}">`).join('');
 }
 function wifiStatusLine(w) {
   const el = $('#wifi-status'); if (!el) return;
@@ -209,8 +213,7 @@ async function loadStatus() {
   const rf = s.rf || [];
   renderVolets(s.volets || [], rf);
   renderRemotes(s.remotes || {}, rf);
-  setPill('#p-wifi', s.wifi && s.wifi.connected, 'Wi-Fi');
-  setPill('#p-mqtt', s.mqtt, 'MQTT');
+  fillVoletPickers(s.volets || []);
   wifiStatusLine(s.wifi); mqttStatusLine(s.mqtt);
   const tb = $('#rf'); if (tb) tb.innerHTML = rf.map(f =>
     `<tr><td class="m">${f.t}</td><td title="${esc(f.serial)}">${esc(remoteName(f.serial))}</td>
