@@ -112,6 +112,7 @@
         <button class="subtab" data-s="device">Appareil</button>
         <button class="subtab" data-s="ota">OTA</button>
         <button class="subtab" data-s="backup">Sauvegarde</button>
+        <button class="subtab" data-s="about">À propos</button>
       </nav>
 
       <div class="subpanel active" data-sp="wifi">
@@ -156,6 +157,11 @@
         <div class="card">
           <h2>Mise à jour (OTA)</h2>
           <p class="sub">Version courante : <code id="ota-version">—</code></p>
+          <h3>Depuis GitHub</h3>
+          <div class="row"><button id="ota-check" class="btn">Vérifier la dernière version</button>
+            <button id="ota-github" class="btn primary" hidden>Installer depuis GitHub</button></div>
+          <p class="hint" id="ota-latest" style="margin:9px 0 0">Récupère la dernière release publiée sur GitHub.</p>
+          <h3>Depuis un fichier</h3>
           <div class="field"><label>Fichier firmware (.bin)</label><input type="file" id="ota-file" accept=".bin"></div>
           <div class="row"><button id="ota-btn" class="btn primary">Flasher</button><button id="ota-rollback" class="btn danger">↩ Version précédente</button></div>
           <div id="ota-prog" hidden style="margin-top:12px"><progress id="ota-bar" max="100" value="0"></progress> <span class="hint" id="ota-msg"></span></div>
@@ -171,6 +177,19 @@
           <h3>Restaurer</h3>
           <div class="field"><input type="file" id="restore-file" accept=".json,application/json"></div>
           <div class="row"><button id="restore-btn" class="btn">Restaurer (remplace la config actuelle)</button></div>
+        </div>
+      </div>
+
+      <div class="subpanel" data-sp="about">
+        <div class="card">
+          <h2>À propos</h2>
+          <p class="sub">Pilotage local des volets Profalux 868 MHz par clonage de télécommande (capture + rejeu), sans clé constructeur.</p>
+          <ul class="links">
+            <li>🌐 <a href="https://www.isno.fr/projets/openprofalux" target="_blank" rel="noopener">Projet &amp; guide — isno.fr</a></li>
+            <li>💻 <a href="https://github.com/Shad107/OpenProfalux" target="_blank" rel="noopener">Code source — GitHub</a></li>
+            <li>⬆️ <a href="https://github.com/Shad107/OpenProfalux/releases" target="_blank" rel="noopener">Dernières versions (OTA)</a></li>
+          </ul>
+          <p class="hint">© 2026 <a href="https://www.isno.fr" target="_blank" rel="noopener">isno.fr</a> — Olivier (Shad107). Open-source.</p>
         </div>
       </div>
     </section>

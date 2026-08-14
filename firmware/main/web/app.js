@@ -173,6 +173,32 @@ $('#ota-rollback').onclick = async () => {
   if (!confirm('Revenir à la version précédente et redémarrer ?')) return;
   await api('/api/ota/rollback', { method: 'POST' }).catch(() => {});
 };
+/* OTA depuis GitHub (la dernière release publique) */
+let githubUrl = null;
+$('#ota-check').onclick = async () => {
+  const span = $('#ota-latest'); span.textContent = '⏳ Interrogation de GitHub…'; $('#ota-github').hidden = true;
+  try {
+    const r = await fetch('https://api.github.com/repos/Shad107/OpenProfalux/releases/latest');
+    if (!r.ok) { span.textContent = r.status === 404 ? '❌ Aucune release publique (dépôt privé ?)' : `❌ HTTP ${r.status}`; return; }
+    const j = await r.json();
+    const latest = j.tag_name || j.name || '?';
+    const cur = $('#ota-version').textContent;
+    githubUrl = (j.assets || []).map(a => a.browser_download_url).find(u => /openprofalux\.bin$/.test(u));
+    if (githubUrl) $('#ota-github').hidden = false;
+    span.textContent = (cur && cur === latest) ? `✅ ${cur} = dernière version`
+      : `⚠️ Installée ${cur}, disponible ${latest}${githubUrl ? '' : ' (pas d’asset .bin)'}`;
+  } catch { span.textContent = '❌ Pas d’accès Internet ?'; }
+};
+$('#ota-github').onclick = async () => {
+  if (!githubUrl || !confirm('Installer la dernière version depuis GitHub et redémarrer ?')) return;
+  $('#ota-prog').hidden = false; $('#ota-github').disabled = true; $('#ota-msg').textContent = 'téléchargement…';
+  await api('/api/ota/pull', { method: 'POST', body: JSON.stringify({ url: githubUrl }) }).catch(() => {});
+  const poll = setInterval(async () => {
+    const s = await api('/api/ota/status').catch(() => null);
+    if (s) { $('#ota-bar').value = s.total ? Math.round(100 * s.written / s.total) : 0; $('#ota-msg').textContent = s.msg || 'en cours…'; }
+    if (s && (s.state === 4 || s.state === 99)) clearInterval(poll);
+  }, 800);
+};
 
 /* ── Restauration ── */
 $('#restore-btn').onclick = async () => {
