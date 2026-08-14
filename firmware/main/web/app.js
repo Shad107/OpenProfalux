@@ -8,14 +8,13 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '
 $$('.tab').forEach(t => t.onclick = () => {
   $$('.tab').forEach(x => x.classList.toggle('active', x === t));
   $$('.panel').forEach(p => p.classList.toggle('active', p.dataset.p === t.dataset.t));
-  if (['sys', 'mqtt', 'ota'].includes(t.dataset.t)) loadConfig();
+  if (['sys', 'wifi', 'mqtt', 'ota'].includes(t.dataset.t)) loadConfig();
 });
 /* Sous-onglets (generique, scope au panneau parent) */
 $$('.subtab').forEach(t => t.onclick = () => {
   const sec = t.closest('.panel');
   $$('.subtab', sec).forEach(x => x.classList.toggle('active', x === t));
   $$('.subpanel', sec).forEach(p => p.classList.toggle('active', p.dataset.sp === t.dataset.s));
-  if (t.dataset.s === 'wifi') loadConfig();
 });
 $('#theme').onclick = () => {
   const r = document.documentElement;
@@ -45,7 +44,7 @@ function renderVolets(list, rf) {
       <div class="top"><span class="name">🪟 ${esc(v.id)}</span><span class="pct">${v.position ?? '?'}%</span></div>
       <div class="dpad"><button data-cmd="up">▲</button><button data-cmd="stop">■</button><button data-cmd="down">▼</button></div>
       <div class="slat" style="--p:${v.position ?? 50}"></div>
-      <div class="serials">serials : ${(v.serials || []).map(s => `<code>${esc(remoteName(s))}</code>`).join(' ') || '—'}
+      <div class="serials">serials : ${(v.serials || []).map(s => `<code>${esc(remoteName(s))}</code>`).join(' ') || 'aucun'}
         ${r != null ? `<span style="margin-left:6px">· reçu ${sig(r)}</span>` : ''}</div>`;
     el.querySelectorAll('[data-cmd]').forEach(b =>
       b.onclick = () => api('/api/shutter', { method: 'POST', body: JSON.stringify({ id: v.id, cmd: b.dataset.cmd }) }));
@@ -128,24 +127,24 @@ async function loadConfig() {
   $('#mqtt-uri').value = c.mqtt_uri || ''; $('#mqtt-user').value = c.mqtt_user || '';
   $('#sys-device').value = c.device || ''; $('#sys-logframes').checked = !!c.log_frames;
   const st = await api('/api/ota/status').catch(() => ({}));
-  $('#ota-version').textContent = st.version || '—';
+  $('#ota-version').textContent = st.version || '…';
 }
 $('#wifi-save').onclick = async () => {
   const b = { wifi_ssid: $('#wifi-ssid').value.trim(), reboot: $('#wifi-reboot').checked };
   if ($('#wifi-pass').value) b.wifi_pass = $('#wifi-pass').value;
   await api('/api/config', { method: 'POST', body: JSON.stringify(b) }).catch(() => {});
-  b.reboot ? toast('Wi-Fi enregistré — redémarrage…') : savedBtn($('#wifi-save'), 'Enregistrer le Wi-Fi');
+  b.reboot ? toast('Wi-Fi enregistré, redémarrage…') : savedBtn($('#wifi-save'), 'Enregistrer le Wi-Fi');
 };
 $('#mqtt-save').onclick = async () => {
   const b = { mqtt_uri: $('#mqtt-uri').value.trim(), mqtt_user: $('#mqtt-user').value.trim(), reboot: true };
   if ($('#mqtt-pass').value) b.mqtt_pass = $('#mqtt-pass').value;
   await api('/api/config', { method: 'POST', body: JSON.stringify(b) }).catch(() => {});
-  toast('MQTT enregistré — redémarrage…');
+  toast('MQTT enregistré, redémarrage…');
 };
 $('#sys-save').onclick = async () => {
   const b = { device: $('#sys-device').value.trim(), log_frames: $('#sys-logframes').checked, reboot: $('#sys-reboot').checked };
   await api('/api/config', { method: 'POST', body: JSON.stringify(b) }).catch(() => {});
-  b.reboot ? toast('Enregistré — redémarrage…') : savedBtn($('#sys-save'), 'Enregistrer');
+  b.reboot ? toast('Enregistré, redémarrage…') : savedBtn($('#sys-save'), 'Enregistrer');
 };
 $('#mqtt-detect').onclick = async () => {
   const b = $('#mqtt-detect'); b.textContent = 'Recherche…'; b.disabled = true;
@@ -225,7 +224,7 @@ function wifiStatusLine(w) {
     el.innerHTML = `<span class="dot"></span><b>Connecté</b> à « ${esc(w.ssid)} » ${sig(w.rssi)}<span class="r">${esc(w.ip || '')}</span>`;
   } else {
     el.className = 'statline bad';
-    el.innerHTML = `<span class="dot"></span><b>Non connecté</b> — le boîtier est en point d'accès de configuration`;
+    el.innerHTML = `<span class="dot"></span><b>Non connecté</b> : le boîtier est en point d'accès de configuration`;
   }
 }
 function mqttStatusLine(ok) {
