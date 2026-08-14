@@ -326,6 +326,11 @@ int cc1101_rx_listen_bits(uint32_t timeout_ms, char *out_bits, int max_bits) {
     cc1101_write_reg(0x1B, 0x07);   /* AGCCTRL2 gain max */
     cc1101_write_reg(0x1C, 0x00);   /* AGCCTRL1 */
     cc1101_write_reg(0x1D, 0x91);   /* AGCCTRL0 */
+    /* Relit les registres RX : si != valeurs ecrites => MOSI marginal (ressoudure)
+     * corrompt la config => RX sourde. Sinon la config est bonne => antenne/RF. */
+    ESP_LOGI(TAG, "RX regs lus: FREQ2=0x%02X(att21) MDMCFG4=0x%02X(C6) AGCCTRL2=0x%02X(07) FSCTRL1=0x%02X(06) IOCFG0=0x%02X(0D)",
+             cc1101_read_reg(0x0D), cc1101_read_reg(0x10), cc1101_read_reg(0x1B),
+             cc1101_read_reg(0x0B), cc1101_read_reg(0x02));
     strobe(CC_SIDLE); esp_rom_delay_us(200);
     strobe(0x33);     /* SCAL */
     vTaskDelay(pdMS_TO_TICKS(3));
@@ -335,28 +340,33 @@ int cc1101_rx_listen_bits(uint32_t timeout_ms, char *out_bits, int max_bits) {
         if ((cc1101_read_reg(CC_MARCSTATE | 0x40) & 0x1F) == 0x0D) break;
         vTaskDelay(pdMS_TO_TICKS(1));
     }
-    ESP_LOGI(TAG, "RX(GDO0): MARCSTATE=0x%02X (0x0D=RX attendu)", cc1101_read_reg(CC_MARCSTATE | 0x40) & 0x1F);
+    ESP_LOGI(TAG, "RX(GDO0): MARCSTATE=0x%02X RSSI=%d dBm (0x0D=RX ; RSSI proche de 0 = bruit fort/antenne)",
+             cc1101_read_reg(CC_MARCSTATE | 0x40) & 0x1F, cc1101_get_rssi());
     /* OOK sans squelch => bruit continu sur GDO0. Comme le sniffer : on ARME une
      * fois, puis on re-arme la RMT UNIQUEMENT apres avoir recu un paquet (sinon la
      * reception precedente est encore en cours => "channel not in enable state").
      * On garde le 1er paquet avec header valide (>=64 bits) ; le bruit est ignore.
      * Reset propre du canal partage avant de commencer (reception pendante possible). */
     rmt_disable(s_cap); rmt_enable(s_cap); xQueueReset(s_capq);
-    /* filtre anti-bruit : le vrai signal HCS300 a des impulsions >=455 us (Te). On
-     * ignore tout ce qui est < 200 us => le bruit OOK rapide est elimine avant de
-     * saturer le buffer, la trame reelle passe. */
-    rmt_receive_config_t rc = { .signal_range_min_ns = 200000, .signal_range_max_ns = 8000000 };
+    /* filtre RMT plafonne a ~3 us par le hardware (255 cycles APB) : on garde 3 us
+     * et on rejette le bruit en SOFT (detection de header dans decode_rmt). */
+    rmt_receive_config_t rc = { .signal_range_min_ns = 3000, .signal_range_max_ns = 8000000 };
     int64_t t_end = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
     int r = -3;
     rmt_rx_done_event_data_t ev;
+    int8_t rssi_max = -128; int nev = 0;
     if (rmt_receive(s_cap, s_capbuf, sizeof(s_capbuf), &rc) == ESP_OK) {
         while (esp_timer_get_time() < t_end) {
-            if (xQueueReceive(s_capq, &ev, pdMS_TO_TICKS(250)) != pdTRUE) continue;  /* tjrs en RX */
+            int8_t rs = cc1101_get_rssi(); if (rs > rssi_max) rssi_max = rs;  /* suit le RSSI en continu */
+            if (xQueueReceive(s_capq, &ev, pdMS_TO_TICKS(100)) != pdTRUE) continue;  /* tjrs en RX */
+            nev++;
             int n = decode_rmt(ev.received_symbols, ev.num_symbols, out_bits, max_bits);
             if (n >= 64) { r = n; break; }                                  /* vraie trame */
             if (rmt_receive(s_cap, s_capbuf, sizeof(s_capbuf), &rc) != ESP_OK) break;  /* re-arme */
         }
     } else r = -2;
+    ESP_LOGI(TAG, "RX fin: RSSI max vu=%d dBm, %d paquet(s) recu(s) (>-60=remote bien recu ; ~-100=rien recu)",
+             rssi_max, nev);
     strobe(CC_SIDLE);
     gpio_set_direction(CC1101_PIN_GDO0, GPIO_MODE_INPUT_OUTPUT);   /* restaure pour le TX bit-bang */
     return r;
