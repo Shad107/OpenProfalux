@@ -264,6 +264,9 @@ async function loadConfig() {
   const c = await api('/api/config').catch(() => ({}));
   $('#wifi-ssid').value = c.wifi_ssid || '';
   $('#mqtt-uri').value = c.mqtt_uri || ''; $('#mqtt-user').value = c.mqtt_user || '';
+  if ($('#mqtt-pass')) $('#mqtt-pass').placeholder = c.mqtt_pass_len
+    ? `•••••••• (${c.mqtt_pass_len} car. enregistrés, laisser vide pour ne pas changer)`
+    : 'mot de passe du broker';
   $('#sys-device').value = c.device || ''; $('#sys-logframes').checked = !!c.log_frames;
   const st = await api('/api/ota/status').catch(() => ({}));
   $('#ota-version').textContent = st.version || '…';

@@ -205,19 +205,22 @@ static void cfg_get(nvs_handle_t h, const char *k, char *out, size_t cap) {
     size_t sz = cap; out[0] = 0; nvs_get_str(h, k, out, &sz);
 }
 static esp_err_t h_config_get(httpd_req_t *r) {
-    char dev[32] = "", ssid[32] = "", uri[96] = "", user[48] = "";
+    char dev[32] = "", ssid[33] = "", uri[160] = "", user[128] = "", pass[256] = "";
     uint8_t logf = 0;
     nvs_handle_t h;
     if (nvs_open("cfg", NVS_READONLY, &h) == ESP_OK) {
         cfg_get(h, "device", dev, sizeof(dev)); cfg_get(h, "wifi_ssid", ssid, sizeof(ssid));
         cfg_get(h, "mqtt_uri", uri, sizeof(uri)); cfg_get(h, "mqtt_user", user, sizeof(user));
+        cfg_get(h, "mqtt_pass", pass, sizeof(pass));   /* longueur seulement, JAMAIS renvoye en clair */
         nvs_get_u8(h, "log_frames", &logf);
         nvs_close(h);
     }
-    char out[352];
+    char out[512];
     snprintf(out, sizeof(out),
-             "{\"device\":\"%s\",\"wifi_ssid\":\"%s\",\"mqtt_uri\":\"%s\",\"mqtt_user\":\"%s\",\"log_frames\":%d}",
-             dev, ssid, uri, user, logf ? 1 : 0);
+             "{\"device\":\"%s\",\"wifi_ssid\":\"%s\",\"mqtt_uri\":\"%s\",\"mqtt_user\":\"%s\","
+             "\"mqtt_user_len\":%d,\"mqtt_pass_len\":%d,\"log_frames\":%d}",
+             dev, ssid, uri, user, (int)strlen(user), (int)strlen(pass), logf ? 1 : 0);
+    memset(pass, 0, sizeof(pass));   /* on n'oublie pas d'effacer le mdp de la pile */
     httpd_resp_set_type(r, "application/json");
     httpd_resp_sendstr(r, out);
     return ESP_OK;

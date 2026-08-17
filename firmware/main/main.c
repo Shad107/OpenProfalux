@@ -36,9 +36,9 @@ static bool s_log_frames = false;   /* option UI "capture toutes les trames" (na
 static char s_device_name[32] = "volet_test";
 static char s_wifi_ssid[32]   = "";
 static char s_wifi_pass[64]   = "";
-static char s_mqtt_uri[128]   = "mqtt://ha.local:1883";
-static char s_mqtt_user[32]   = "";
-static char s_mqtt_pass[64]   = "";
+static char s_mqtt_uri[160]   = "mqtt://ha.local:1883";
+static char s_mqtt_user[128]  = "";   /* certains brokers utilisent des tokens JWT longs */
+static char s_mqtt_pass[256]  = "";   /* HA peut generer des mdp broker >64 : marge (nvs_get_str echoue si buffer trop court -> champ vide -> 'not authorized'). Aligne sur OpenXtraflame. */
 
 static pfx_tx_state_t g_state;
 
