@@ -41,6 +41,9 @@ esptool.py --chip esp32 -p /dev/ttyUSB0 --baud 460800 write_flash 0x0 openprofal
 ```
 Windows (PowerShell) : `esptool.exe --chip esp32 --port COM4 --baud 115200 write_flash 0x0 openprofalux-full-esp32.bin`
 
+> `460800` accélère l'écriture mais ne passe pas sur tous les câbles/puces USB. En cas d'erreur
+> (*Timed out waiting for packet*, *invalid head of packet*), retomber à `--baud 115200`, qui marche partout.
+
 Déjà sous OpenProfalux ? Pas besoin de câble : **onglet OTA → uploader `openprofalux.bin`**
 (binaire applicatif seul), ou pousser son URL via MQTT (`openprofalux/ota/pull`).
 
