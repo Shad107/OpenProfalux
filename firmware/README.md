@@ -33,19 +33,25 @@ idf.py set-target esp32 && idf.py build
 
 ### Option A — release pré-compilée (le plus simple, pas d'ESP-IDF)
 Télécharger les binaires de la [dernière release](https://github.com/Shad107/OpenProfalux/releases)
-puis, avec juste `esptool` (`pip install esptool`) :
+puis, avec juste `esptool` (`pip install esptool`). **Choisir le binaire selon la carte** — les
+broches SPI diffèrent, un binaire d'une carte ne marchera pas sur l'autre :
+
+| Carte | Board neuf (`write_flash 0x0`) | Mise à jour OTA (onglet OTA) |
+|---|---|---|
+| **M5Stack ATOM Lite** (ESP32-PICO) | `openprofalux-atom-full.bin` | `openprofalux-atom-ota.bin` |
+| **ESP32 DevKit** (CC1101 externe) | `openprofalux-devkit-full.bin` | `openprofalux-devkit-ota.bin` |
 
 ```bash
 # Board neuf / réinstallation complète : image fusionnée à flasher à 0x0
-esptool.py --chip esp32 -p /dev/ttyUSB0 --baud 460800 write_flash 0x0 openprofalux-full-esp32.bin
+esptool.py --chip esp32 -p /dev/ttyUSB0 --baud 460800 write_flash 0x0 openprofalux-atom-full.bin
 ```
-Windows (PowerShell) : `esptool.exe --chip esp32 --port COM4 --baud 115200 write_flash 0x0 openprofalux-full-esp32.bin`
+Windows (PowerShell) : `esptool.exe --chip esp32 --port COM4 --baud 115200 write_flash 0x0 openprofalux-atom-full.bin`
 
 > `460800` accélère l'écriture mais ne passe pas sur tous les câbles/puces USB. En cas d'erreur
 > (*Timed out waiting for packet*, *invalid head of packet*), retomber à `--baud 115200`, qui marche partout.
 
-Déjà sous OpenProfalux ? Pas besoin de câble : **onglet OTA → uploader `openprofalux.bin`**
-(binaire applicatif seul), ou pousser son URL via MQTT (`openprofalux/ota/pull`).
+Déjà sous OpenProfalux ? Pas besoin de câble : **onglet OTA → uploader le `-ota.bin`** de ta carte,
+ou pousser son URL via MQTT (`openprofalux/ota/pull`).
 
 ### Option B — depuis les sources
 ```bash
