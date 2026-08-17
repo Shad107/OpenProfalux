@@ -178,6 +178,18 @@ static esp_err_t h_learn_adopt(httpd_req_t *r) {
     return ESP_OK;
 }
 
+static esp_err_t h_rf_replay(httpd_req_t *r) {
+    char *body = read_body(r); if (!body) return httpd_resp_send_err(r, 400, "body");
+    cJSON *j = cJSON_Parse(body); free(body);
+    if (!j) return httpd_resp_send_err(r, 400, "json");
+    const char *hs = jstr(j, "hop");
+    uint32_t hop = hs ? (uint32_t)strtoul(hs, NULL, 16) : 0;
+    int rc = shutters_replay_frame(jstr(j, "serial"), hop);
+    cJSON_Delete(j);
+    httpd_resp_sendstr(r, rc == 0 ? "{\"ok\":1}" : "{\"ok\":0}");
+    return ESP_OK;
+}
+
 /* ── /api/calibrate + /api/remote ── */
 static esp_err_t h_calibrate(httpd_req_t *r) {
     char *body = read_body(r); if (!body) return httpd_resp_send_err(r, 400, "body");
@@ -281,6 +293,26 @@ static esp_err_t h_frames(httpd_req_t *r) {
     }
     httpd_resp_sendstr_chunk(r, "}}");
     httpd_resp_send_chunk(r, NULL, 0);
+    return ESP_OK;
+}
+
+/* ── /api/rf : les 300 dernieres trames du ring (plus recente d'abord), pour l'onglet RF ── */
+static esp_err_t h_rf(httpd_req_t *req) {
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr_chunk(req, "[");
+    char serial[SH_SERIAL_LEN], line[160];
+    uint8_t button; uint32_t hop, t; int8_t rssi;
+    int cap = shutters_rf_capacity(), first = 1;
+    for (int k = 0; k < cap; k++) {
+        if (shutters_rf_get(k, serial, sizeof(serial), &button, &hop, &t, &rssi) != 0) continue;
+        int p = snprintf(line, sizeof(line),
+            "%s{\"serial\":\"%s\",\"button\":\"%X\",\"hop\":\"%08X\",\"rssi\":%d,\"t\":%u}",
+            first ? "" : ",", serial, button, (unsigned)hop, rssi, (unsigned)t);
+        httpd_resp_send_chunk(req, line, p);
+        first = 0;
+    }
+    httpd_resp_sendstr_chunk(req, "]");
+    httpd_resp_send_chunk(req, NULL, 0);
     return ESP_OK;
 }
 
@@ -390,7 +422,7 @@ static void reg(httpd_handle_t s, const char *uri, httpd_method_t m, esp_err_t (
 
 void web_ui_start(void) {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.max_uri_handlers = 22;
+    cfg.max_uri_handlers = 28;   /* > nb d'endpoints reels (sinon "no slots left" -> /api/... non enregistres) */
     cfg.stack_size = 6144;   /* esp_ota_end() consomme la pile en fin d'upload */
     cfg.uri_match_fn = httpd_uri_match_wildcard;
     httpd_handle_t s = NULL;
@@ -406,6 +438,7 @@ void web_ui_start(void) {
     reg(s, "/api/learn/assign", HTTP_POST, h_learn_assign);
     reg(s, "/api/learn/reassign", HTTP_POST, h_learn_reassign);
     reg(s, "/api/learn/adopt", HTTP_POST, h_learn_adopt);
+    reg(s, "/api/rf/replay", HTTP_POST, h_rf_replay);
     reg(s, "/api/calibrate", HTTP_POST, h_calibrate);
     reg(s, "/api/remote",    HTTP_POST, h_remote);
     reg(s, "/api/config",    HTTP_GET,  h_config_get);
@@ -415,6 +448,7 @@ void web_ui_start(void) {
     reg(s, "/api/ota/rollback", HTTP_POST, h_ota_rollback);
     reg(s, "/api/ota/pull",     HTTP_POST, h_ota_pull);
     reg(s, "/api/frames",       HTTP_GET,  h_frames);
+    reg(s, "/api/rf",           HTTP_GET,  h_rf);
     reg(s, "/api/backup",       HTTP_GET,  h_backup);
     reg(s, "/api/restore",      HTTP_POST, h_restore);
     reg(s, "/api/mqtt/discover", HTTP_GET, h_mqtt_discover);

@@ -67,11 +67,11 @@ main{padding:14px 0 60px}
 select{width:100%;padding:9px 11px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font:inherit;font-size:.92rem}
 select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-weak)}
 .panel{display:none;animation:fade .18s ease}
-.panel.active{display:grid;gap:16px}
+.panel.active{display:grid;gap:16px;grid-template-columns:minmax(0,1fr)}   /* minmax(0,..) : autorise les items a retrecir -> le tableau scrolle dans .tbl-wrap (mobile) */
 @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 .grid{display:grid;gap:16px}
 @media(min-width:620px){.grid.two{grid-template-columns:1fr 1fr}}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow)}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow);min-width:0}
 .card>h2{margin-bottom:3px}
 .card .sub{color:var(--muted);font-size:.85rem;margin:2px 0 14px}
 .card h3{margin:16px 0 9px}
@@ -130,6 +130,8 @@ th{font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:var(--mut
 tbody tr+tr td{border-top:1px solid var(--border)}
 td.m{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .badge{font-family:var(--mono);font-size:.76rem;padding:1px 7px;border-radius:6px;background:var(--accent-weak);color:var(--accent);font-weight:600}
+button.replay{padding:2px 9px;font-size:.8rem;line-height:1.2;border-radius:6px;cursor:pointer}
+button.replay:disabled{opacity:.5;cursor:default}
 
 .statline{display:flex;align-items:center;gap:10px;padding:11px 13px;background:var(--surface-2);border-radius:var(--radius-sm);border:1px solid var(--border);margin-bottom:15px;font-size:.88rem;flex-wrap:wrap}
 .statline .dot{width:9px;height:9px;border-radius:50%;flex:none;background:var(--muted)}

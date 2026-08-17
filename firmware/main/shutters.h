@@ -36,6 +36,11 @@ int  shutters_remote_name(const char *serial, const char *name);
 void shutters_on_rx(const char *bits, uint32_t serial, uint8_t button, int8_t rssi, uint32_t hop);
 /* Adopte une trame vue dans le journal RF (identifiee par serial+hop) et l'affecte a une action. */
 int  shutters_adopt(const char *id, const char *action, const char *serial, uint32_t hop);
+/* Rejoue telle quelle une trame captee (serial+hop) depuis le journal RF (bouton "rejouer" du debug). */
+int  shutters_replay_frame(const char *serial, uint32_t hop);
+/* Ring RF (300 trames recentes) pour /api/rf : k=0 = plus recente. Renvoie 0 si presente, -1 sinon. */
+int  shutters_rf_get(int k, char *serial, int sser, uint8_t *button, uint32_t *hop, uint32_t *t, int8_t *rssi);
+int  shutters_rf_capacity(void);
 
 /* Produit le JSON /api/status dans buf (taille cap). Retourne la longueur. */
 int  shutters_status_json(char *buf, int cap);

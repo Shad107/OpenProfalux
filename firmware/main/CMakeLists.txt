@@ -18,6 +18,7 @@ idf_component_register(
         "web/app.js"
     REQUIRES
         nvs_flash
+        spiffs
         esp_wifi
         esp_netif
         esp_event

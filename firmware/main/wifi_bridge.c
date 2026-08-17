@@ -5,6 +5,9 @@
 #include <esp_netif.h>
 #include <esp_log.h>
 #include <esp_mac.h>
+#include <esp_sntp.h>
+#include <time.h>
+#include <stdlib.h>
 #include <freertos/event_groups.h>
 
 static const char *TAG = "wifi";
@@ -23,6 +26,15 @@ static void wifi_event_cb(void *arg, esp_event_base_t base, int32_t id, void *da
         ip_event_got_ip_t *evt = (ip_event_got_ip_t *)data;
         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&evt->ip_info.ip));
         xEventGroupSetBits(s_wifi_events, WIFI_CONNECTED_BIT);
+        /* Horloge reelle (SNTP) : date correctement les trames RF, meme apres reboot. Une seule init. */
+        static bool s_sntp = false;
+        if (!s_sntp) {
+            s_sntp = true;
+            setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1); tzset();   /* Europe/Paris (heure d'ete auto) */
+            esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
+            esp_sntp_setservername(0, "pool.ntp.org");
+            esp_sntp_init();
+        }
     }
 }
 

@@ -32,9 +32,10 @@ static void handle_incoming(const char *topic, int tlen, const char *data, int d
     ESP_LOGI(TAG, "RX topic=%s len=%d", t, dlen);
     publish_log("info", t);
 
-    /* Cover HA + switch "Ecoute RF permanente" -> handler générique shutters */
+    /* Cover HA + switch "Ecoute RF permanente" + repeuplement frames/log -> handler shutters */
     if (strncmp(t, TOPIC_BASE "/cover/", strlen(TOPIC_BASE "/cover/")) == 0
-        || strcmp(t, TOPIC_BASE "/listen/set") == 0) {
+        || strncmp(t, TOPIC_BASE "/frames/log/", strlen(TOPIC_BASE "/frames/log/")) == 0
+        || strncmp(t, TOPIC_BASE "/listen/", strlen(TOPIC_BASE "/listen/")) == 0) {   /* set + state (restauration au boot) */
         if (s_hdl.on_message) s_hdl.on_message(t, data, dlen);
         return;
     }
@@ -88,6 +89,7 @@ static void mqtt_event_cb(void *arg, esp_event_base_t base, int32_t id, void *ev
             esp_mqtt_client_subscribe(s_mqtt, TOPIC_BASE "/cover/+/set", 1);
             esp_mqtt_client_subscribe(s_mqtt, TOPIC_BASE "/cover/+/set_position", 1);
             esp_mqtt_client_subscribe(s_mqtt, TOPIC_BASE "/ota/pull", 1);
+            esp_mqtt_client_subscribe(s_mqtt, TOPIC_BASE "/frames/log/#", 1);   /* repeuplement du ring si NVS vide */
             mqtt_pub_system_status();
             publish_log("info", "MQTT connected");
             if (s_hdl.on_connected) s_hdl.on_connected();   /* -> publie la decouverte HA (vraie connexion) */

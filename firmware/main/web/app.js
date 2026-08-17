@@ -24,8 +24,10 @@ function applyRoute() {
   const sec = $(`.panel[data-p="${main}"]`);
   if (sub && sec) activateSub(sec, sub);
   if (typeof loadStatus === 'function') loadStatus();   /* refresh immediat a chaque changement d'onglet (ex: RF debug) */
-  if (sub === 'rf' && typeof loadFrames === 'function') loadFrames();   /* dataset enregistre */
+  if (sub === 'rf') { if (typeof loadRf === 'function') loadRf(); if (typeof loadFrames === 'function') loadFrames(); }
 }
+/* Rafraichit les 300 trames quand l'onglet RF est actif (sans surcharger les autres onglets). */
+setInterval(() => { if ((location.hash || '').includes('/rf') && typeof loadRf === 'function') loadRf(); }, 5000);
 async function loadFrames() {
   const box = $('#frames-dataset'); if (!box) return;
   box.innerHTML = '<p class="hint">Chargement…</p>';
@@ -404,14 +406,34 @@ async function loadStatus() {
   if (!learning) { renderVoletPicker(); renderLearnSlots(); }
   wifiStatusLine(s.wifi); mqttStatusLine(s.mqtt);
   const ci = $('#calib-info'); if (ci) ci.hidden = !!s.listening;   /* bandeau visible seulement si option OFF */
-  const up = s.uptime || 0;   /* uptime boitier -> on date les trames via l'horloge du navigateur */
-  const tb = $('#rf'); if (tb) tb.innerHTML = rf.map(f => {
-    const when = new Date(Date.now() - Math.max(0, up - f.t) * 1000);
-    const ts = when.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    return `<tr><td class="m">${ts}</td><td title="${esc(f.serial)}">${esc(remoteName(f.serial))}</td>
-      <td><span class="badge">0x${esc(f.button)}</span></td><td class="m">0x${esc(f.hop)}</td><td class="m">${f.rssi} dBm</td></tr>`;
-  }).join('');
 }
+/* Une ligne de trame : heure epoch reelle (SNTP) + bouton rejouer. */
+function rfRow(f) {
+  const ts = f.t > 1600000000
+    ? new Date(f.t * 1000).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : '—';
+  return `<tr><td class="m">${ts}</td><td title="${esc(f.serial)}">${esc(remoteName(f.serial))}</td>
+    <td><span class="badge">0x${esc(f.button)}</span></td><td class="m">0x${esc(f.hop)}</td><td class="m">${f.rssi} dBm</td>
+    <td><button class="replay" title="Rejouer cette trame" data-s="${esc(f.serial)}" data-h="${esc(f.hop)}">▶</button></td></tr>`;
+}
+/* Onglet RF : les 300 dernieres trames du ring (survivent au reboot via NVS, aussi publiees en MQTT). */
+async function loadRf() {
+  const tb = $('#rf'); if (!tb) return;
+  const list = await api('/api/rf').catch(() => null);
+  if (Array.isArray(list)) {
+    list.sort((a, b) => (b.t || 0) - (a.t || 0));   /* plus recent d'abord (robuste apres repeuplement MQTT) */
+    tb.innerHTML = list.map(rfRow).join('');
+  }
+}
+/* Rejouer une trame captee : renvoie la trame brute (serial+hop) au boitier. Delegation (le tbody est re-rendu). */
+const rfBody = $('#rf');
+if (rfBody) rfBody.addEventListener('click', async (e) => {
+  const b = e.target.closest('button.replay'); if (!b) return;
+  b.disabled = true;
+  const r = await api('/api/rf/replay', { method: 'POST', body: JSON.stringify({ serial: b.dataset.s, hop: b.dataset.h }) }).catch(() => null);
+  toast(r && r.ok ? 'Trame rejouée' : 'Échec du rejeu');
+  setTimeout(() => { b.disabled = false; }, 800);
+});
 applyRoute();
 loadStatus();
 setInterval(loadStatus, 3000);

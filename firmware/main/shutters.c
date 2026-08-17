@@ -7,10 +7,12 @@
 #include <strings.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <time.h>
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "esp_spiffs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -57,14 +59,17 @@ static volet_t  s_volets[SH_MAX_VOLETS];
 static int      s_nvolets = 0;
 static remote_t s_remotes[16];
 static int      s_nremotes = 0;
-static rfrec_t  s_rf[12];
+#define RF_RING 300           /* trames recentes rejouables : persistees NVS + publiees MQTT (recuperables) */
+#define STATUS_RF_SHOW 20     /* nb de trames recentes mises dans /api/status (leger, poll 3 s) ; l'onglet RF charge les 300 via /api/rf */
+static rfrec_t  s_rf[RF_RING];
 static int      s_rfhead = 0;
 static SemaphoreHandle_t s_lock;
 static char     s_device[32] = "op";   /* nom appareil (prefixe topics HA) */
 static bool     s_mqtt_ready = false;   /* true apres shutters_mqtt_announce() */
 static bool     s_log_frames = false;   /* publie toutes les trames captees en MQTT */
 static bool     s_frames_dirty = false; /* dataset modifie -> a resauvegarder en NVS */
-#define FRAMES_NVS_MAX 512              /* trames (hops distincts) persistees en NVS (borne, ~4 Ko) */
+static bool     s_ring_dirty = false;    /* ring RF modifie -> a resauvegarder en NVS */
+#define FRAMES_NVS_MAX 256              /* hops distincts persistes NVS (~2 Ko) ; NVS=16Ko partagee avec le ring 300 + cfg. Le gros dataset slide s'accumule cote MQTT/HA. */
 
 #define LOCK()   xSemaphoreTake(s_lock, portMAX_DELAY)
 #define UNLOCK() xSemaphoreGive(s_lock)
@@ -120,6 +125,7 @@ int shutters_remote_dump(int i, char *serial, int sser, char *name, int sname, u
 /* Serialise toute la config (telecommandes + noms + trames de reference + calibration). */
 static char *cfg_to_json(void) {
     cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "log_frames", s_log_frames);   /* ecoute permanente : restauree au boot */
     cJSON *rem = cJSON_AddObjectToObject(root, "remotes");
     for (int i = 0; i < s_nremotes; i++) cJSON_AddStringToObject(rem, s_remotes[i].serial, s_remotes[i].name);
     cJSON *vols = cJSON_AddArrayToObject(root, "volets");
@@ -200,6 +206,94 @@ static void load_frames(void) {   /* appele au boot (sous LOCK via shutters_init
     }
 }
 
+/* Reconstruit la trame 66 bits a partir de serial(28)+bouton(4)+hop(32) : format deterministe
+ * (radio.c : hop=bits[0..31], serial=bits[32..59], bouton=bits[60..63], LSB-first). Les 2 bits
+ * de statut (VLOW/RPT, bits[64..65]) ne sont pas transmis -> 0 (sans effet sur le rejeu). */
+static void build_frame_bits(char *out, uint32_t serial, uint8_t button, uint32_t hop) {
+    for (int i = 0; i < 32; i++) out[i]      = ((hop    >> i) & 1u) ? '1' : '0';
+    for (int i = 0; i < 28; i++) out[32 + i] = ((serial >> i) & 1u) ? '1' : '0';
+    for (int i = 0; i < 4;  i++) out[60 + i] = ((button >> i) & 1u) ? '1' : '0';
+    out[64] = '0'; out[65] = '0'; out[66] = 0;
+}
+
+/* Persistance BORNEE du ring RF en NVS : on ne stocke que les METADONNEES {serial,bouton,hop,t,rssi}
+ * (16 o/trame) et on RECONSTRUIT les bits au boot -> les trames restent REJOUABLES apres reboot/flash. */
+typedef struct { uint32_t serial, hop, t; uint8_t button; int8_t rssi; uint16_t _pad; } ringrec_t;
+#define RING_FILE "/spiffs/rfring.bin"
+static void spiffs_mount(void) {   /* la NVS (16 Ko) ne tient pas le ring 300 -> SPIFFS (partition storage, 960 Ko) */
+    esp_vfs_spiffs_conf_t c = { .base_path = "/spiffs", .partition_label = "storage", .max_files = 4, .format_if_mount_failed = true };
+    esp_err_t e = esp_vfs_spiffs_register(&c);
+    ESP_LOGI(TAG, "spiffs mount: %s", esp_err_to_name(e));
+}
+static void save_ring(void) {
+    static ringrec_t buf[RF_RING]; int head;   /* static : hors pile (tick_task) */
+    LOCK();
+    head = s_rfhead;
+    for (int i = 0; i < RF_RING; i++) {
+        rfrec_t *r = &s_rf[i];
+        buf[i].serial = r->serial[0] ? (uint32_t)strtoul(r->serial, NULL, 16) : 0;
+        buf[i].hop = r->hop; buf[i].t = r->t; buf[i].button = r->button; buf[i].rssi = r->rssi; buf[i]._pad = 0;
+    }
+    s_ring_dirty = false;
+    UNLOCK();
+    FILE *f = fopen(RING_FILE, "wb");
+    if (!f) { ESP_LOGW(TAG, "save_ring: fopen KO"); return; }
+    fwrite(&head, sizeof(head), 1, f);
+    size_t w = fwrite(buf, 1, sizeof(buf), f);
+    fclose(f);
+    ESP_LOGI(TAG, "save_ring: %d o ecrits (head=%d)", (int)w, head);
+}
+static void load_ring(void) {   /* boot : restaure le ring + reconstruit les bits (trames rejouables) */
+    FILE *f = fopen(RING_FILE, "rb");
+    if (!f) { ESP_LOGW(TAG, "load_ring: pas de fichier (rien a charger)"); return; }
+    int head = 0;
+    if (fread(&head, sizeof(head), 1, f) != 1) { fclose(f); return; }
+    static ringrec_t buf[RF_RING];
+    size_t r = fread(buf, 1, sizeof(buf), f);
+    fclose(f);
+    int n = r / sizeof(ringrec_t); if (n > RF_RING) n = RF_RING;
+    int loaded = 0;
+    for (int i = 0; i < n; i++) {
+        rfrec_t *rr = &s_rf[i];
+        if (!buf[i].serial && !buf[i].hop) { rr->serial[0] = 0; rr->bits[0] = 0; continue; }
+        snprintf(rr->serial, SH_SERIAL_LEN, "0x%07X", (unsigned)buf[i].serial);
+        rr->hop = buf[i].hop; rr->t = buf[i].t; rr->button = buf[i].button; rr->rssi = buf[i].rssi;
+        build_frame_bits(rr->bits, buf[i].serial, buf[i].button, buf[i].hop);
+        loaded++;
+    }
+    if (head >= 0 && head < RF_RING) s_rfhead = head;
+    ESP_LOGI(TAG, "load_ring: %d trames rechargees (%d o, head=%d)", loaded, (int)r, head);
+}
+
+/* Repeuplement depuis MQTT (frames/log/<slot>) : remplit le slot UNIQUEMENT s'il est vide (NVS vide)
+ * -> restaure affichage RF + rejeu + dataset slide. Ne republie rien. Reconcilie aussi la NVS. */
+static void ring_fill_from_mqtt(int slot, const char *ser, uint8_t button, uint32_t hop, uint32_t t, int8_t rssi) {
+    if (slot < 0 || slot >= RF_RING || !ser || !ser[0]) return;
+    LOCK();
+    rfrec_t *r = &s_rf[slot];
+    if (!r->serial[0]) {   /* vide seulement : la NVS (si presente) reste prioritaire */
+        strlcpy(r->serial, ser, SH_SERIAL_LEN);
+        r->button = button; r->hop = hop; r->t = t; r->rssi = rssi;
+        build_frame_bits(r->bits, (uint32_t)strtoul(ser, NULL, 16), button, hop);
+        s_ring_dirty = true;
+        remote_t *rm = NULL;
+        for (int i = 0; i < s_nremotes; i++) if (!strcmp(s_remotes[i].serial, ser)) { rm = &s_remotes[i]; break; }
+        if (!rm && s_nremotes < 16) { rm = &s_remotes[s_nremotes++]; memset(rm, 0, sizeof(*rm)); strlcpy(rm->serial, ser, SH_SERIAL_LEN); }
+        if (rm) {
+            bool isnew = true;
+            for (int i = 0; i < rm->nhops; i++) if (rm->hops[i] == hop) { isnew = false; break; }
+            if (isnew) {
+                if (rm->nhops >= rm->caphops && rm->caphops < SH_MAX_HOPS) {
+                    uint16_t nc = rm->caphops ? (uint16_t)(rm->caphops * 2) : 32; if (nc > SH_MAX_HOPS) nc = SH_MAX_HOPS;
+                    uint32_t *np = realloc(rm->hops, (size_t)nc * sizeof(uint32_t)); if (np) { rm->hops = np; rm->caphops = nc; }
+                }
+                if (rm->nhops < rm->caphops) { rm->hops[rm->nhops++] = hop; s_frames_dirty = true; }
+            }
+        }
+    }
+    UNLOCK();
+}
+
 /* Remet la config a zero (libere les sets de hops avant reload/import). */
 static void reset_state(void) {
     for (int i = 0; i < s_nremotes; i++) { free(s_remotes[i].hops); s_remotes[i].hops = NULL; s_remotes[i].nhops = s_remotes[i].caphops = 0; }
@@ -207,6 +301,8 @@ static void reset_state(void) {
 }
 /* Peuple s_remotes/s_volets depuis un JSON (l'etat doit etre remis a zero avant). */
 static void parse_cfg_json(cJSON *root) {
+    cJSON *lf = cJSON_GetObjectItem(root, "log_frames");
+    if (cJSON_IsBool(lf)) s_log_frames = cJSON_IsTrue(lf);   /* restaure l'ecoute permanente au boot */
     cJSON *rem = cJSON_GetObjectItem(root, "remotes");
     for (cJSON *it = rem ? rem->child : NULL; it && s_nremotes < 16; it = it->next) {
         strlcpy(s_remotes[s_nremotes].serial, it->string, SH_SERIAL_LEN);
@@ -258,6 +354,34 @@ static void load_cfg(void) {
 static void emit_press(const char *bits) {
     if (bits && bits[0]) radio_tx(bits, PRESS_REPEATS);
 }
+/* Rejoue TELLE QUELLE une trame captee (identifiee par serial+hop dans l'anneau RF).
+ * Sert au bouton "rejouer" du debug RF : on renvoie la trame brute, sans passer par un volet. */
+int shutters_replay_frame(const char *serial, uint32_t hop) {
+    if (!serial || !serial[0]) return -1;
+    char bits[SH_BITS_LEN] = {0};
+    LOCK();
+    for (int k = 0; k < RF_RING; k++) {
+        rfrec_t *r = &s_rf[k];
+        if (r->bits[0] && !strcmp(r->serial, serial) && r->hop == hop) { strlcpy(bits, r->bits, SH_BITS_LEN); break; }
+    }
+    UNLOCK();
+    if (!bits[0]) return -2;   /* plus dans l'anneau (ecrasee) */
+    emit_press(bits);
+    return 0;
+}
+/* Dump du ring RF pour /api/rf : k=0 = plus recente. Renvoie 0 si trame presente, -1 sinon. */
+int shutters_rf_get(int k, char *serial, int sser, uint8_t *button, uint32_t *hop, uint32_t *t, int8_t *rssi) {
+    if (k < 0 || k >= RF_RING) return -1;
+    LOCK();
+    int idx = (s_rfhead - 1 - k + 2 * RF_RING) % RF_RING;
+    rfrec_t *r = &s_rf[idx];
+    if (!r->serial[0]) { UNLOCK(); return -1; }
+    strlcpy(serial, r->serial, sser);
+    *button = r->button; *hop = r->hop; *t = r->t; *rssi = r->rssi;
+    UNLOCK();
+    return 0;
+}
+int shutters_rf_capacity(void) { return RF_RING; }
 /* bouton (4 bits LSB) d'une trame captee (bits[60..63]). */
 static uint8_t bits_button(const char *b) {
     uint8_t v = 0;
@@ -453,6 +577,7 @@ static void tick_task(void *arg) {
         if (++save_ticks * TICK_MS >= 60000) {
             save_ticks = 0;
             if (s_frames_dirty) save_frames();
+            if (s_ring_dirty)   save_ring();   /* trames recentes rejouables persistees */
         }
     }
 }
@@ -514,7 +639,7 @@ int shutters_adopt(const char *id, const char *action, const char *serial, uint3
     if (!id || !action || !serial) return -1;
     char bits[SH_BITS_LEN] = {0};
     LOCK();
-    for (int k = 0; k < 12; k++) {
+    for (int k = 0; k < RF_RING; k++) {
         rfrec_t *r = &s_rf[k];
         if (r->bits[0] && !strcmp(r->serial, serial) && r->hop == hop) { strlcpy(bits, r->bits, SH_BITS_LEN); break; }
     }
@@ -566,23 +691,26 @@ static void dataset_log_frame(const char *shex, uint8_t button, uint32_t hop, in
         if (np) { rm->hops = np; rm->caphops = nc; }
     }
     if (rm->nhops < rm->caphops) { rm->hops[rm->nhops++] = hop; s_frames_dirty = true; }   /* a resauvegarder en NVS */
-    char topic[64], pl[160];
-    snprintf(topic, sizeof(topic), "openprofalux/frames/%s", shex);
-    snprintf(pl, sizeof(pl), "{\"button\":%u,\"hop\":\"0x%08X\",\"rssi\":%d,\"distinct\":%u}",
-             button, (unsigned)hop, rssi, (unsigned)rm->nhops);
-    mqtt_pub_raw(topic, pl, 0, 0);
-    snprintf(topic, sizeof(topic), "openprofalux/frames/%s/count", shex);
-    snprintf(pl, sizeof(pl), "%u", (unsigned)rm->nhops);
-    mqtt_pub_raw(topic, pl, 0, 1);   /* le broker/HA accumule le total reel (dataset slide) */
+    /* Plus de publication frames/<serial> ni /count : une seule structure MQTT = l'anneau frames/log/<n>.
+     * Le dataset slide (hops distincts) reste construit ici en RAM/NVS pour l'export /api/frames. */
 }
 
-/* Rattrapage : rejoue le ring RF recent (12 dernieres trames) vers le dataset MQTT,
- * du plus ancien au plus recent. Appele sous LOCK, no-op si option off ou MQTT absent. */
+/* Rattrapage a la connexion : pousse TOUT le ring (trames captees hors-ligne) vers MQTT,
+ * du plus ancien au plus recent -> dataset (dedup) + anneau retained frames/log/<slot>.
+ * Realise le modele tampon : capte toujours, buffer si MQTT absent, flush a l'activation.
+ * Appele sous LOCK, no-op si option off ou MQTT absent. */
 static void flush_frame_ring_locked(void) {
     if (!s_log_frames || !s_mqtt_ready) return;
-    for (int k = 0; k < 12; k++) {
-        rfrec_t *r = &s_rf[(s_rfhead + k) % 12];
-        if (r->serial[0]) dataset_log_frame(r->serial, r->button, r->hop, r->rssi);
+    char lt[48], lf[128];
+    for (int k = 0; k < RF_RING; k++) {
+        int slot = (s_rfhead + k) % RF_RING;
+        rfrec_t *r = &s_rf[slot];
+        if (!r->serial[0]) continue;
+        dataset_log_frame(r->serial, r->button, r->hop, r->rssi);   /* dataset slide (dedup) */
+        snprintf(lf, sizeof(lf), "{\"serial\":\"%s\",\"button\":\"0x%X\",\"hop\":\"0x%08X\",\"rssi\":%d,\"t\":%u}",
+                 r->serial, r->button, (unsigned)r->hop, r->rssi, (unsigned)r->t);
+        snprintf(lt, sizeof(lt), "openprofalux/frames/log/%d", slot);
+        mqtt_pub_raw(lt, lf, 1, 1);   /* QoS 1 (confirme) + retained : recuperable via frames/log/# */
     }
 }
 
@@ -615,11 +743,15 @@ void shutters_on_rx(const char *bits, uint32_t serial, uint8_t button, int8_t rs
              (unsigned)serial, button, (unsigned)hop, rssi);
     LOCK();
     /* journal RF pour le monitor UI (+ trame complete rejouable pour l'adoption) */
+    int slot = s_rfhead;   /* emplacement de l'anneau -> topic MQTT recuperable frames/log/<slot> */
     rfrec_t *r = &s_rf[s_rfhead];
-    r->t = (uint32_t)(esp_timer_get_time() / 1000000); r->button = button; r->hop = hop; r->rssi = rssi;
+    time_t now = time(NULL);
+    r->t = (now > 1600000000) ? (uint32_t)now : 0;   /* epoch si horloge SNTP synchro, sinon 0 = heure inconnue */
+    r->button = button; r->hop = hop; r->rssi = rssi;
     snprintf(r->serial, SH_SERIAL_LEN, "0x%07X", (unsigned)serial);
     strlcpy(r->bits, bits ? bits : "", SH_BITS_LEN);
-    s_rfhead = (s_rfhead + 1) % 12;
+    s_rfhead = (s_rfhead + 1) % RF_RING;
+    s_ring_dirty = true;   /* ring modifie -> a resauvegarder en NVS (trames rejouables apres reboot) */
     /* auto-enregistre le serial vu (nom vide) */
     char shex[SH_SERIAL_LEN]; snprintf(shex, sizeof(shex), "0x%07X", (unsigned)serial);
     bool known = false;
@@ -628,10 +760,14 @@ void shutters_on_rx(const char *bits, uint32_t serial, uint8_t button, int8_t rs
 
     if (s_log_frames && s_mqtt_ready) {
         dataset_log_frame(shex, button, hop, rssi);  /* fonction 1 : dataset dedup (compteur retenu) */
-        char lf[112];   /* capteur HA "Derniere trame" : chaque trame visible dans HA */
-        snprintf(lf, sizeof(lf), "{\"serial\":\"%s\",\"button\":\"0x%X\",\"hop\":\"0x%08X\",\"rssi\":%d}",
-                 shex, button, (unsigned)hop, rssi);
-        mqtt_pub_raw("openprofalux/frames/last", lf, 0, 1);
+        char lf[128];
+        snprintf(lf, sizeof(lf), "{\"serial\":\"%s\",\"button\":\"0x%X\",\"hop\":\"0x%08X\",\"rssi\":%d,\"t\":%u}",
+                 shex, button, (unsigned)hop, rssi, (unsigned)r->t);
+        mqtt_pub_raw("openprofalux/frames/last", lf, 0, 1);   /* capteur HA "Derniere trame" */
+        /* anneau retained : chaque trame sur SON topic -> un abonne a frames/log/# recupere les 300.
+         * Le slot est reutilise (recyclage auto). Contient tout le necessaire au rejeu + dataset slide. */
+        char lt[48]; snprintf(lt, sizeof(lt), "openprofalux/frames/log/%d", slot);
+        mqtt_pub_raw(lt, lf, 1, 1);   /* QoS 1 : "seulement si reussi" (le broker confirme, sinon retransmission) */
     }
     track_shutter_position(shex, button);                                          /* fonction 2 (toujours) */
     UNLOCK();
@@ -673,9 +809,9 @@ int shutters_status_json(char *buf, int cap) {
         add_cmd_json(cmd, "down", v->down, v->down_btn);
         cJSON_AddItemToArray(vols, o);
     }
-    cJSON *rf = cJSON_AddArrayToObject(root, "rf");
-    for (int k = 0; k < 12; k++) {
-        int idx = (s_rfhead - 1 - k + 24) % 12;
+    cJSON *rf = cJSON_AddArrayToObject(root, "rf");   /* recentes seulement ; les 300 via /api/rf */
+    for (int k = 0; k < STATUS_RF_SHOW; k++) {
+        int idx = (s_rfhead - 1 - k + 2 * RF_RING) % RF_RING;
         rfrec_t *r = &s_rf[idx];
         if (!r->serial[0]) continue;
         cJSON *f = cJSON_CreateObject();
@@ -759,9 +895,32 @@ void shutters_mqtt_lost(void) {
 }
 
 void shutters_mqtt_on_message(const char *topic, const char *data, int len) {
-    /* Switch HA "Ecoute RF permanente" */
+    /* Switch HA "Ecoute RF permanente" (commande) */
     if (!strcmp(topic, "openprofalux/listen/set")) {
         shutters_set_log_frames(len >= 2 && !strncasecmp(data, "ON", 2));   /* publie l'etat + re-annonce */
+        return;
+    }
+    /* Etat retained (publie par nous) : restaure l'ecoute au boot si differente. Garde anti-boucle. */
+    if (!strcmp(topic, "openprofalux/listen/state")) {
+        bool on = (len >= 2 && !strncasecmp(data, "ON", 2));
+        if (on != s_log_frames) shutters_set_log_frames(on);   /* re-echo ignore (meme valeur) */
+        return;
+    }
+    /* Repeuplement du ring depuis MQTT (retained frames/log/<slot>) : rempli si slot vide (NVS vide). */
+    if (!strncmp(topic, "openprofalux/frames/log/", 24)) {
+        int slot = atoi(topic + 24);
+        cJSON *j = cJSON_ParseWithLength(data, len);
+        if (j) {
+            const char *ser = cJSON_GetStringValue(cJSON_GetObjectItem(j, "serial"));
+            const char *bs  = cJSON_GetStringValue(cJSON_GetObjectItem(j, "button"));
+            const char *hs  = cJSON_GetStringValue(cJSON_GetObjectItem(j, "hop"));
+            cJSON *tj = cJSON_GetObjectItem(j, "t"), *rj = cJSON_GetObjectItem(j, "rssi");
+            if (ser && hs)
+                ring_fill_from_mqtt(slot, ser,
+                    bs ? (uint8_t)strtoul(bs, NULL, 16) : 0, (uint32_t)strtoul(hs, NULL, 16),
+                    tj ? (uint32_t)cJSON_GetNumberValue(tj) : 0, rj ? (int8_t)cJSON_GetNumberValue(rj) : 0);
+            cJSON_Delete(j);
+        }
         return;
     }
     static const char P[] = "openprofalux/cover/";
@@ -802,6 +961,7 @@ void shutters_set_log_frames(bool on) {
     s_log_frames = on;
     update_listening();
     LOCK();
+    save_cfg();                                        /* persiste l'ecoute permanente -> restauree au boot */
     if (on) flush_frame_ring_locked();                 /* si MQTT deja connecte : rattrape le ring tout de suite */
     for (int i = 0; i < s_nvolets; i++) announce_one(&s_volets[i]);   /* re-publie la decouverte : position apparait/disparait selon l'option */
     if (s_mqtt_ready) mqtt_pub_raw("openprofalux/listen/state", on ? "ON" : "OFF", 0, 1);   /* etat du switch HA */
@@ -818,9 +978,11 @@ void shutters_init(void) {
     s_lock = xSemaphoreCreateMutex();
     load_cfg();
     load_frames();   /* restaure le dataset de trames borne persiste en NVS (survit au reboot) */
+    spiffs_mount();  /* stockage du ring RF (trop gros pour la NVS 16 Ko) */
+    load_ring();     /* restaure les trames recentes rejouables (bits reconstruits) apres reboot */
     xTaskCreate(tick_task, "sh_tick", 4096, NULL, 5, NULL);
     radio_init();
     radio_start(on_air);   /* tache radio prete (arbitre TX) */
     update_listening();    /* ecoute si des volets sont deja appris (suivi position) ou si capture ON */
-    ESP_LOGI(TAG, "init : %d volets, %d telecommandes", s_nvolets, s_nremotes);
+    ESP_LOGI(TAG, "init : %d volets, %d telecommandes, ecoute permanente=%s", s_nvolets, s_nremotes, s_log_frames ? "ON" : "OFF");
 }
