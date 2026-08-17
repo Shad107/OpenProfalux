@@ -52,15 +52,16 @@ typedef struct {
     uint16_t  caphops;       /* capacite allouee du set */
 } remote_t;
 
-typedef struct { uint32_t t; char serial[SH_SERIAL_LEN]; uint8_t button; uint32_t hop; int8_t rssi;
-                 char bits[SH_BITS_LEN]; } rfrec_t;   /* bits = trame complete rejouable (pour adoption) */
+typedef struct { uint32_t t; char serial[SH_SERIAL_LEN]; uint8_t button; uint32_t hop; int8_t rssi; } rfrec_t;
+/* LEGER (pas de bits stockes) : les 66 bits sont RECONSTRUITS a la demande depuis serial+bouton+hop
+ * (build_frame_bits) pour le rejeu et l'adoption -> permet un ring de 1000 sans exploser la RAM. */
 
 static volet_t  s_volets[SH_MAX_VOLETS];
 static int      s_nvolets = 0;
 static remote_t s_remotes[16];
 static int      s_nremotes = 0;
-#define RF_RING 300           /* trames recentes rejouables : persistees NVS + publiees MQTT (recuperables) */
-#define STATUS_RF_SHOW 20     /* nb de trames recentes mises dans /api/status (leger, poll 3 s) ; l'onglet RF charge les 300 via /api/rf */
+#define RF_RING 1000          /* trames a l'affichage (paginees) ; l'export /api/frames = l'ensemble du dataset */
+#define STATUS_RF_SHOW 20     /* nb de trames recentes mises dans /api/status (leger, poll 3 s) ; l'onglet RF pagine via /api/rf */
 static rfrec_t  s_rf[RF_RING];
 static int      s_rfhead = 0;
 static SemaphoreHandle_t s_lock;
@@ -220,26 +221,27 @@ static void build_frame_bits(char *out, uint32_t serial, uint8_t button, uint32_
  * (16 o/trame) et on RECONSTRUIT les bits au boot -> les trames restent REJOUABLES apres reboot/flash. */
 typedef struct { uint32_t serial, hop, t; uint8_t button; int8_t rssi; uint16_t _pad; } ringrec_t;
 #define RING_FILE "/spiffs/rfring.bin"
+static ringrec_t s_ringbuf[RF_RING];   /* buffer partage save/load (hors pile, 1 seule copie) */
 static void spiffs_mount(void) {   /* la NVS (16 Ko) ne tient pas le ring 300 -> SPIFFS (partition storage, 960 Ko) */
     esp_vfs_spiffs_conf_t c = { .base_path = "/spiffs", .partition_label = "storage", .max_files = 4, .format_if_mount_failed = true };
     esp_err_t e = esp_vfs_spiffs_register(&c);
     ESP_LOGI(TAG, "spiffs mount: %s", esp_err_to_name(e));
 }
 static void save_ring(void) {
-    static ringrec_t buf[RF_RING]; int head;   /* static : hors pile (tick_task) */
+    int head;
     LOCK();
     head = s_rfhead;
     for (int i = 0; i < RF_RING; i++) {
         rfrec_t *r = &s_rf[i];
-        buf[i].serial = r->serial[0] ? (uint32_t)strtoul(r->serial, NULL, 16) : 0;
-        buf[i].hop = r->hop; buf[i].t = r->t; buf[i].button = r->button; buf[i].rssi = r->rssi; buf[i]._pad = 0;
+        s_ringbuf[i].serial = r->serial[0] ? (uint32_t)strtoul(r->serial, NULL, 16) : 0;
+        s_ringbuf[i].hop = r->hop; s_ringbuf[i].t = r->t; s_ringbuf[i].button = r->button; s_ringbuf[i].rssi = r->rssi; s_ringbuf[i]._pad = 0;
     }
     s_ring_dirty = false;
     UNLOCK();
     FILE *f = fopen(RING_FILE, "wb");
     if (!f) { ESP_LOGW(TAG, "save_ring: fopen KO"); return; }
     fwrite(&head, sizeof(head), 1, f);
-    size_t w = fwrite(buf, 1, sizeof(buf), f);
+    size_t w = fwrite(s_ringbuf, 1, sizeof(s_ringbuf), f);
     fclose(f);
     ESP_LOGI(TAG, "save_ring: %d o ecrits (head=%d)", (int)w, head);
 }
@@ -248,17 +250,15 @@ static void load_ring(void) {   /* boot : restaure le ring + reconstruit les bit
     if (!f) { ESP_LOGW(TAG, "load_ring: pas de fichier (rien a charger)"); return; }
     int head = 0;
     if (fread(&head, sizeof(head), 1, f) != 1) { fclose(f); return; }
-    static ringrec_t buf[RF_RING];
-    size_t r = fread(buf, 1, sizeof(buf), f);
+    size_t r = fread(s_ringbuf, 1, sizeof(s_ringbuf), f);
     fclose(f);
     int n = r / sizeof(ringrec_t); if (n > RF_RING) n = RF_RING;
     int loaded = 0;
     for (int i = 0; i < n; i++) {
         rfrec_t *rr = &s_rf[i];
-        if (!buf[i].serial && !buf[i].hop) { rr->serial[0] = 0; rr->bits[0] = 0; continue; }
-        snprintf(rr->serial, SH_SERIAL_LEN, "0x%07X", (unsigned)buf[i].serial);
-        rr->hop = buf[i].hop; rr->t = buf[i].t; rr->button = buf[i].button; rr->rssi = buf[i].rssi;
-        build_frame_bits(rr->bits, buf[i].serial, buf[i].button, buf[i].hop);
+        if (!s_ringbuf[i].serial && !s_ringbuf[i].hop) { rr->serial[0] = 0; continue; }
+        snprintf(rr->serial, SH_SERIAL_LEN, "0x%07X", (unsigned)s_ringbuf[i].serial);
+        rr->hop = s_ringbuf[i].hop; rr->t = s_ringbuf[i].t; rr->button = s_ringbuf[i].button; rr->rssi = s_ringbuf[i].rssi;
         loaded++;
     }
     if (head >= 0 && head < RF_RING) s_rfhead = head;
@@ -274,7 +274,6 @@ static void ring_fill_from_mqtt(int slot, const char *ser, uint8_t button, uint3
     if (!r->serial[0]) {   /* vide seulement : la NVS (si presente) reste prioritaire */
         strlcpy(r->serial, ser, SH_SERIAL_LEN);
         r->button = button; r->hop = hop; r->t = t; r->rssi = rssi;
-        build_frame_bits(r->bits, (uint32_t)strtoul(ser, NULL, 16), button, hop);
         s_ring_dirty = true;
         remote_t *rm = NULL;
         for (int i = 0; i < s_nremotes; i++) if (!strcmp(s_remotes[i].serial, ser)) { rm = &s_remotes[i]; break; }
@@ -362,7 +361,9 @@ int shutters_replay_frame(const char *serial, uint32_t hop) {
     LOCK();
     for (int k = 0; k < RF_RING; k++) {
         rfrec_t *r = &s_rf[k];
-        if (r->bits[0] && !strcmp(r->serial, serial) && r->hop == hop) { strlcpy(bits, r->bits, SH_BITS_LEN); break; }
+        if (r->serial[0] && !strcmp(r->serial, serial) && r->hop == hop) {   /* reconstruit les 66 bits a la demande */
+            build_frame_bits(bits, (uint32_t)strtoul(serial, NULL, 16), r->button, hop); break;
+        }
     }
     UNLOCK();
     if (!bits[0]) return -2;   /* plus dans l'anneau (ecrasee) */
@@ -641,7 +642,9 @@ int shutters_adopt(const char *id, const char *action, const char *serial, uint3
     LOCK();
     for (int k = 0; k < RF_RING; k++) {
         rfrec_t *r = &s_rf[k];
-        if (r->bits[0] && !strcmp(r->serial, serial) && r->hop == hop) { strlcpy(bits, r->bits, SH_BITS_LEN); break; }
+        if (r->serial[0] && !strcmp(r->serial, serial) && r->hop == hop) {   /* reconstruit les 66 bits */
+            build_frame_bits(bits, (uint32_t)strtoul(serial, NULL, 16), r->button, hop); break;
+        }
     }
     UNLOCK();
     if (!bits[0]) return -1;
@@ -749,7 +752,7 @@ void shutters_on_rx(const char *bits, uint32_t serial, uint8_t button, int8_t rs
     r->t = (now > 1600000000) ? (uint32_t)now : 0;   /* epoch si horloge SNTP synchro, sinon 0 = heure inconnue */
     r->button = button; r->hop = hop; r->rssi = rssi;
     snprintf(r->serial, SH_SERIAL_LEN, "0x%07X", (unsigned)serial);
-    strlcpy(r->bits, bits ? bits : "", SH_BITS_LEN);
+    (void)bits;   /* plus stocke : les 66 bits sont reconstruits a la demande (rejeu/adoption) */
     s_rfhead = (s_rfhead + 1) % RF_RING;
     s_ring_dirty = true;   /* ring modifie -> a resauvegarder en NVS (trames rejouables apres reboot) */
     /* auto-enregistre le serial vu (nom vide) */

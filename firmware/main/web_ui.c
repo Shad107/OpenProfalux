@@ -297,7 +297,7 @@ static esp_err_t h_frames(httpd_req_t *r) {
 }
 
 /* ── /api/rf?offset=&limit= : trames du ring triees par date (recentes d'abord), paginees ── */
-#define RF_MAX_ITEMS 300
+#define RF_MAX_ITEMS 1000
 typedef struct { char serial[SH_SERIAL_LEN]; uint32_t hop, t; uint8_t button; int8_t rssi; } rfitem_t;
 static int rf_cmp(const void *a, const void *b) {   /* t decroissant (plus recent d'abord) */
     uint32_t ta = ((const rfitem_t *)a)->t, tb = ((const rfitem_t *)b)->t;

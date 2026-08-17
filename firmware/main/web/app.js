@@ -407,12 +407,16 @@ async function loadStatus() {
   wifiStatusLine(s.wifi); mqttStatusLine(s.mqtt);
   const ci = $('#calib-info'); if (ci) ci.hidden = !!s.listening;   /* bandeau visible seulement si option OFF */
 }
-/* Une ligne de trame : heure epoch reelle (SNTP) + bouton rejouer. */
+/* Volet auquel une telecommande (serial) est rattachee, sinon null. */
+function voletForSerial(s) { for (const v of (statusCache.volets || [])) if ((v.serials || []).includes(s)) return v.id; return null; }
+/* Une ligne de trame : heure reelle (SNTP) + nom telecommande/volet si connu + bouton rejouer. */
 function rfRow(f) {
   const ts = f.t > 1600000000
     ? new Date(f.t * 1000).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
     : '—';
-  return `<tr><td class="m">${ts}</td><td title="${esc(f.serial)}">${esc(remoteName(f.serial))}</td>
+  const nm = remoteName(f.serial);              /* nom de la telecommande si nommee, sinon le serial */
+  const vn = voletForSerial(f.serial);          /* volet rattache si connu */
+  return `<tr><td class="m">${ts}</td><td title="${esc(f.serial)}">${esc(nm)}${vn ? ` <span class="hint">· ${esc(vn)}</span>` : ''}</td>
     <td><span class="badge">0x${esc(f.button)}</span></td><td class="m">0x${esc(f.hop)}</td><td class="m">${f.rssi} dBm</td>
     <td><button class="replay" title="Rejouer cette trame" data-s="${esc(f.serial)}" data-h="${esc(f.hop)}">▶</button></td></tr>`;
 }
