@@ -24,10 +24,10 @@ function applyRoute() {
   const sec = $(`.panel[data-p="${main}"]`);
   if (sub && sec) activateSub(sec, sub);
   if (typeof loadStatus === 'function') loadStatus();   /* refresh immediat a chaque changement d'onglet (ex: RF debug) */
-  if (sub === 'rf') { if (typeof loadRf === 'function') loadRf(); if (typeof loadFrames === 'function') loadFrames(); }
+  if (sub === 'rf') { if (typeof loadRf === 'function') loadRf(true); if (typeof loadFrames === 'function') loadFrames(); }
 }
-/* Rafraichit les 300 trames quand l'onglet RF est actif (sans surcharger les autres onglets). */
-setInterval(() => { if ((location.hash || '').includes('/rf') && typeof loadRf === 'function') loadRf(); }, 5000);
+/* Rafraichit la 1re page quand l'onglet RF est actif ET qu'on n'a pas defile (sinon on garde la position). */
+setInterval(() => { if ((location.hash || '').includes('/rf') && typeof loadRf === 'function' && rfOffset <= RF_PAGE) loadRf(true); }, 5000);
 async function loadFrames() {
   const box = $('#frames-dataset'); if (!box) return;
   box.innerHTML = '<p class="hint">Chargement…</p>';
@@ -416,14 +416,33 @@ function rfRow(f) {
     <td><span class="badge">0x${esc(f.button)}</span></td><td class="m">0x${esc(f.hop)}</td><td class="m">${f.rssi} dBm</td>
     <td><button class="replay" title="Rejouer cette trame" data-s="${esc(f.serial)}" data-h="${esc(f.hop)}">▶</button></td></tr>`;
 }
-/* Onglet RF : les 300 dernieres trames du ring (survivent au reboot via NVS, aussi publiees en MQTT). */
-async function loadRf() {
-  const tb = $('#rf'); if (!tb) return;
-  const list = await api('/api/rf').catch(() => null);
-  if (Array.isArray(list)) {
-    list.sort((a, b) => (b.t || 0) - (a.t || 0));   /* plus recent d'abord (robuste apres repeuplement MQTT) */
-    tb.innerHTML = list.map(rfRow).join('');
-  }
+/* Onglet RF : trames du ring, chargees par pages (scroll infini). Trie serveur par date. */
+let rfOffset = 0, rfTotal = 0, rfLoading = false;
+const RF_PAGE = 50;
+function updateRfFooter() {
+  const f = $('#rf-footer'); if (!f) return;
+  f.textContent = rfTotal
+    ? `${Math.min(rfOffset, rfTotal)} / ${rfTotal} trame(s)` + (rfOffset < rfTotal ? ' — défile pour charger la suite' : '')
+    : 'Aucune trame captée.';
+}
+async function loadRf(reset) {
+  const tb = $('#rf'); if (!tb || rfLoading) return;
+  rfLoading = true;
+  if (reset) rfOffset = 0;
+  const d = await api(`/api/rf?offset=${rfOffset}&limit=${RF_PAGE}`).catch(() => null);
+  rfLoading = false;
+  if (!d || !Array.isArray(d.frames)) return;
+  rfTotal = d.total || 0;
+  const html = d.frames.map(rfRow).join('');
+  if (reset) tb.innerHTML = html; else tb.insertAdjacentHTML('beforeend', html);
+  rfOffset += d.frames.length;
+  updateRfFooter();
+}
+/* Scroll infini : charge la page suivante quand la sentinelle (bas du tableau) devient visible. */
+{
+  const sen = $('#rf-sentinel');
+  if (sen && 'IntersectionObserver' in window)
+    new IntersectionObserver(es => { if (es[0].isIntersecting && !rfLoading && rfOffset < rfTotal) loadRf(false); }).observe(sen);
 }
 /* Rejouer une trame captee : renvoie la trame brute (serial+hop) au boitier. Delegation (le tbody est re-rendu). */
 const rfBody = $('#rf');

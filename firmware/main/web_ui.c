@@ -296,22 +296,42 @@ static esp_err_t h_frames(httpd_req_t *r) {
     return ESP_OK;
 }
 
-/* ── /api/rf : les 300 dernieres trames du ring (plus recente d'abord), pour l'onglet RF ── */
+/* ── /api/rf?offset=&limit= : trames du ring triees par date (recentes d'abord), paginees ── */
+#define RF_MAX_ITEMS 300
+typedef struct { char serial[SH_SERIAL_LEN]; uint32_t hop, t; uint8_t button; int8_t rssi; } rfitem_t;
+static int rf_cmp(const void *a, const void *b) {   /* t decroissant (plus recent d'abord) */
+    uint32_t ta = ((const rfitem_t *)a)->t, tb = ((const rfitem_t *)b)->t;
+    return (tb > ta) - (tb < ta);
+}
 static esp_err_t h_rf(httpd_req_t *req) {
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr_chunk(req, "[");
-    char serial[SH_SERIAL_LEN], line[160];
-    uint8_t button; uint32_t hop, t; int8_t rssi;
-    int cap = shutters_rf_capacity(), first = 1;
-    for (int k = 0; k < cap; k++) {
-        if (shutters_rf_get(k, serial, sizeof(serial), &button, &hop, &t, &rssi) != 0) continue;
-        int p = snprintf(line, sizeof(line),
-            "%s{\"serial\":\"%s\",\"button\":\"%X\",\"hop\":\"%08X\",\"rssi\":%d,\"t\":%u}",
-            first ? "" : ",", serial, button, (unsigned)hop, rssi, (unsigned)t);
-        httpd_resp_send_chunk(req, line, p);
-        first = 0;
+    int offset = 0, limit = 50;
+    char q[80], v[16];
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
+        if (httpd_query_key_value(q, "offset", v, sizeof(v)) == ESP_OK) offset = atoi(v);
+        if (httpd_query_key_value(q, "limit", v, sizeof(v)) == ESP_OK) limit = atoi(v);
     }
-    httpd_resp_sendstr_chunk(req, "]");
+    if (limit < 1) limit = 1;
+    if (limit > 100) limit = 100;
+    if (offset < 0) offset = 0;
+    /* collecte toutes les trames du ring puis tri par date (le ring peut etre desordonne apres repeuplement MQTT) */
+    static rfitem_t items[RF_MAX_ITEMS];
+    int cap = shutters_rf_capacity(); if (cap > RF_MAX_ITEMS) cap = RF_MAX_ITEMS;
+    int n = 0;
+    for (int k = 0; k < cap; k++)
+        if (shutters_rf_get(k, items[n].serial, sizeof(items[n].serial), &items[n].button, &items[n].hop, &items[n].t, &items[n].rssi) == 0) n++;
+    qsort(items, n, sizeof(rfitem_t), rf_cmp);
+    httpd_resp_set_type(req, "application/json");
+    char line[176];
+    int p = snprintf(line, sizeof(line), "{\"total\":%d,\"offset\":%d,\"frames\":[", n, offset);
+    httpd_resp_send_chunk(req, line, p);
+    for (int i = offset, c = 0; i < n && c < limit; i++, c++) {
+        rfitem_t *it = &items[i];
+        p = snprintf(line, sizeof(line),
+            "%s{\"serial\":\"%s\",\"button\":\"%X\",\"hop\":\"%08X\",\"rssi\":%d,\"t\":%u}",
+            c ? "," : "", it->serial, it->button, (unsigned)it->hop, it->rssi, (unsigned)it->t);
+        httpd_resp_send_chunk(req, line, p);
+    }
+    httpd_resp_sendstr_chunk(req, "]}");
     httpd_resp_send_chunk(req, NULL, 0);
     return ESP_OK;
 }
