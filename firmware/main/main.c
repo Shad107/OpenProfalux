@@ -144,6 +144,7 @@ void app_main(void) {
         ESP_LOGI(TAG, "TX SELFTEST OK : la puce emet (MARCSTATE=TX).");
     else
         ESP_LOGW(TAG, "TX SELFTEST ECHEC : puce NE passe PAS en TX (config/SPI).");
+    cc1101_rx_probe();   /* sonde de bruit RX au boot (comparaison module/antenne) */
 
     /* 4c. Modele cover + arbitre radio (RX permanent gere en interne) */
     shutters_init();

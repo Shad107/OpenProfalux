@@ -26,6 +26,7 @@ int  cc1101_rx_stop(void);
 
 /* Auto-test emission : renvoie 0 si la puce passe bien en TX (MARCSTATE 0x13). */
 int  cc1101_tx_selftest(void);
+int  cc1101_rx_probe(void);   /* sonde de bruit RX au boot (RSSI + nb d'evenements RMT a vide) */
 
 /* Auto-capture : initialise le RMT sur GDO0 pour relire notre propre emission. */
 int  cc1101_capture_init(void);
@@ -34,7 +35,7 @@ int  cc1101_tx_and_capture_bits(const uint8_t *frame, size_t bits, char *out_bit
 /* Ecoute en RX pendant timeout_ms, decode la 1re trame recue. Retourne nbits (<0=rien). */
 int  cc1101_rx_listen_bits(uint32_t timeout_ms, char *out_bits, int max_bits);
 /* Rejoue (TX) une trame brute (chaine '0'/'1' en ordre du fil) en OOK HCS30x. */
-int  cc1101_tx_raw_bits(const char *bits, int n);
+int  cc1101_tx_raw_bits(const char *bits, int n, int repeats);
 
 /* Utils */
 extern int g_tx_marc;   /* MARCSTATE lu apres le dernier STX (0x13=TX). Diagnostic. */

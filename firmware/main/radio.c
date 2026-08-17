@@ -35,10 +35,10 @@ void radio_init(void) {
     esp_log_level_set("rmt", ESP_LOG_NONE);
 }
 
-void radio_tx(const char *bits) {
+void radio_tx(const char *bits, int repeats) {
     if (!bits || !bits[0] || !s_mtx) return;
     xSemaphoreTake(s_mtx, portMAX_DELAY);
-    cc1101_tx_raw_bits(bits, (int)strlen(bits));
+    cc1101_tx_raw_bits(bits, (int)strlen(bits), repeats);   /* rafale en UNE session TX */
     xSemaphoreGive(s_mtx);
 }
 

@@ -174,14 +174,12 @@ static void load_cfg(void) {
 }
 
 /* ── RF ── */
-#define PRESS_REPEATS 4   /* nb de trames par "appui" (comme la rafale d'une vraie telecommande) */
-/* Emet 1 trame via l'arbitre radio (serialise avec l'ecoute permanente). */
-static void emit(const char *bits) {
-    if (bits && bits[0]) radio_tx(bits);
-}
-/* Emet une RAFALE = 1 appui de telecommande (le moteur part ensuite tout seul jusqu'au STOP/butee). */
+#define PRESS_REPEATS 10   /* nb de trames par "appui" : le bit-bang peut etre preempte par le WiFi
+                              (trame corrompue) ; plus de repetitions = plus de chances qu'une passe propre */
+/* Emet une RAFALE = 1 appui de telecommande, en UNE session TX (trames dos-a-dos, une seule
+ * calibration) via l'arbitre radio. Le moteur part ensuite tout seul jusqu'au STOP/butee. */
 static void emit_press(const char *bits) {
-    for (int i = 0; i < PRESS_REPEATS; i++) emit(bits);
+    if (bits && bits[0]) radio_tx(bits, PRESS_REPEATS);
 }
 /* bouton (4 bits LSB) d'une trame captee (bits[60..63]). */
 static uint8_t bits_button(const char *b) {

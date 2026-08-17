@@ -20,7 +20,7 @@ typedef void (*radio_frame_cb_t)(const char *bits, uint32_t serial, uint8_t butt
 
 void radio_init(void);                 /* cree le mutex (idempotent) */
 void radio_start(radio_frame_cb_t cb); /* demarre la tache RX (en veille tant que listening OFF) */
-void radio_tx(const char *bits);       /* rejoue une trame (mutex-garde) — marche listening ON ou OFF */
+void radio_tx(const char *bits, int repeats);   /* rejoue une trame `repeats` fois en UNE rafale TX (mutex-garde) */
 int  radio_listen_once(uint32_t timeout_ms, char *buf, int max); /* ecoute dediee (apprentissage) — marche tjrs */
 void radio_pause_rx(bool pause);       /* pause TEMPORAIRE pendant nos TX (stream maintien) */
 void radio_set_listening(bool on);     /* interrupteur MAITRE : l'ecoute permanente (case UI "capture") */
