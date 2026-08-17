@@ -24,7 +24,26 @@ function applyRoute() {
   const sec = $(`.panel[data-p="${main}"]`);
   if (sub && sec) activateSub(sec, sub);
   if (typeof loadStatus === 'function') loadStatus();   /* refresh immediat a chaque changement d'onglet (ex: RF debug) */
+  if (sub === 'rf' && typeof loadFrames === 'function') loadFrames();   /* dataset enregistre */
 }
+async function loadFrames() {
+  const box = $('#frames-dataset'); if (!box) return;
+  box.innerHTML = '<p class="hint">Chargement…</p>';
+  const d = await api('/api/frames').catch(() => null);
+  const fr = d && d.trames;
+  if (!fr || !Object.keys(fr).length) {
+    box.innerHTML = '<p class="hint">Aucune trame enregistrée (active « Écoute RF permanente » puis presse une télécommande).</p>';
+    return;
+  }
+  box.innerHTML = Object.entries(fr).map(([serial, info]) => {
+    const hops = info.hops || [];
+    const shown = hops.slice(0, 300).map(h => `<code>${esc(h)}</code>`).join(' ');
+    const more = hops.length > 300 ? ` <span class="hint">+${hops.length - 300} autres</span>` : '';
+    return `<div class="card" style="margin-top:8px;padding:10px 12px"><b>${esc(remoteName(serial))}</b>
+      <span class="hint">· ${info.count} trame(s) distincte(s)</span><div class="hops">${shown}${more}</div></div>`;
+  }).join('');
+}
+if ($('#frames-reload')) $('#frames-reload').onclick = loadFrames;
 $$('.tab').forEach(t => t.onclick = () => { location.hash = t.dataset.t; });
 $$('.subtab').forEach(t => t.onclick = () => {
   location.hash = `${t.closest('.panel').dataset.p}/${t.dataset.s}`;
