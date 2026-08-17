@@ -84,6 +84,23 @@ static volet_t *get_or_create(const char *id) {
     return v;
 }
 
+/* nom volet -> slug HA-safe ([a-zA-Z0-9_-]) : espaces/accents interdits dans les topics
+ * (decouverte HA ET command/state), sinon commandes/decouverte cassees. */
+static void slugify(char *dst, int cap, const char *src) {
+    int p = 0;
+    for (int k = 0; src[k] && p < cap - 1; k++) {
+        char c = src[k];
+        dst[p++] = ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') ? c : '_';
+    }
+    dst[p] = 0;
+    if (!p && cap > 6) strlcpy(dst, "volet", cap);
+}
+static volet_t *find_volet_by_slug(const char *slug) {
+    char s[SH_ID_LEN];
+    for (int i = 0; i < s_nvolets; i++) { slugify(s, sizeof(s), s_volets[i].id); if (!strcmp(s, slug)) return &s_volets[i]; }
+    return NULL;
+}
+
 /* ── Persistance JSON <-> NVS ── */
 /* Serialise toute la config (telecommandes + noms + trames de reference + calibration). */
 static char *cfg_to_json(void) {
@@ -220,14 +237,15 @@ static void ha_state_str(const volet_t *v, char *out) {
 /* Publie position + etat du volet (retained). Appele sous LOCK. */
 static void publish_volet_state(volet_t *v) {
     if (!s_mqtt_ready) return;
-    char topic[96], pl[16], st[10];
+    char topic[96], pl[16], st[10], slug[SH_ID_LEN];
+    slugify(slug, sizeof(slug), v->id);   /* topics slugifies (coherents avec la decouverte) */
     if (s_log_frames) {   /* position publiee seulement si suivi actif (coherent avec la decouverte + l'UI) */
-        snprintf(topic, sizeof(topic), "openprofalux/cover/%s/position", v->id);
+        snprintf(topic, sizeof(topic), "openprofalux/cover/%s/position", slug);
         snprintf(pl, sizeof(pl), "%d", (int)(v->position + 0.5f));
         mqtt_pub_raw(topic, pl, 0, 1);
     }
     ha_state_str(v, st);
-    snprintf(topic, sizeof(topic), "openprofalux/cover/%s/state", v->id);
+    snprintf(topic, sizeof(topic), "openprofalux/cover/%s/state", slug);
     mqtt_pub_raw(topic, st, 0, 1);
     v->pub_pos = (int)(v->position + 0.5f); v->pub_dir = v->dir;
 }
@@ -248,36 +266,31 @@ static void announce_one(volet_t *v) {
     /* Position exposee a HA UNIQUEMENT si l'ecoute permanente est active (comme dans l'UI web) :
      * sinon un coup de vraie telecommande desynchronise l'estimation, un % faux est pire qu'aucun.
      * Sans l'option, le cover reste pilotable (ouvrir/fermer/stop) mais sans position. */
-    /* slug HA-safe pour object_id / unique_id / topic de decouverte : le nom du volet peut
-     * contenir espaces/accents (ex "Chambre parents"), INTERDITS dans un topic de decouverte
-     * HA -> sinon la config est rejetee silencieusement et l'entite n'apparait jamais. */
-    char slug[SH_ID_LEN]; int sp = 0;
-    for (int k = 0; v->id[k] && sp < (int)sizeof(slug) - 1; k++) {
-        char c = v->id[k];
-        slug[sp++] = ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') ? c : '_';
-    }
-    slug[sp] = 0;
-    if (!sp) strlcpy(slug, "volet", sizeof(slug));
+    /* slug HA-safe : le nom du volet peut avoir espaces/accents (ex "Chambre Parent"),
+     * INTERDITS dans les topics (decouverte ET command/state). On slugifie PARTOUT et on
+     * resout le volet par slug a la reception (find_volet_by_slug). */
+    char slug[SH_ID_LEN]; slugify(slug, sizeof(slug), v->id);
+    const char *devname = (!s_device[0] || !strcmp(s_device, "openprofalux")) ? "OpenProfalux" : s_device;
     /* Position seulement si ecoute permanente (sinon % non fiable) */
     char pos[240] = "";
     if (s_log_frames)
         snprintf(pos, sizeof(pos),
             "\"position_topic\":\"openprofalux/cover/%s/position\","
             "\"set_position_topic\":\"openprofalux/cover/%s/set_position\","
-            "\"position_open\":100,\"position_closed\":0,", v->id, v->id);
-    snprintf(topic, sizeof(topic), "homeassistant/cover/openprofalux_%s_%s/config", s_device, slug);
-    /* Cles en TOUTES LETTRES (alignees sur OpenXtraflame qui fonctionne) ; device PARTAGE
-     * (identifiers commun) -> tous les volets regroupes sous un seul appareil "OpenProfalux". */
+            "\"position_open\":100,\"position_closed\":0,", slug, slug);
+    snprintf(topic, sizeof(topic), "homeassistant/cover/openprofalux_%s/config", slug);
+    /* Cles en TOUTES LETTRES (alignees sur OpenXtraflame) ; device PARTAGE (un seul appareil
+     * "OpenProfalux" regroupe tous les volets) ; topics command/state SLUGIFIES. */
     snprintf(pl, 1536,
-        "{\"name\":\"%s\",\"unique_id\":\"openprofalux_%s_%s\",\"object_id\":\"openprofalux_%s_%s\",\"device_class\":\"shutter\","
+        "{\"name\":\"%s\",\"unique_id\":\"openprofalux_%s\",\"object_id\":\"openprofalux_%s\",\"device_class\":\"shutter\","
         "\"command_topic\":\"openprofalux/cover/%s/set\","
         "\"payload_open\":\"OPEN\",\"payload_close\":\"CLOSE\",\"payload_stop\":\"STOP\","
         "%s"
         "\"state_topic\":\"openprofalux/cover/%s/state\","
         "\"availability_topic\":\"openprofalux/%s/status\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\","
-        "\"device\":{\"identifiers\":[\"openprofalux_%s\"],\"name\":\"OpenProfalux %s\","
-        "\"manufacturer\":\"isno.fr\",\"model\":\"ESP32+CC1101\",\"configuration_url\":\"%s\"}}",
-        v->id, s_device, slug, s_device, slug, v->id, pos, v->id, s_device, s_device, s_device, cu);
+        "\"device\":{\"identifiers\":[\"openprofalux\"],\"name\":\"%s\","
+        "\"manufacturer\":\"isno.fr\",\"model\":\"OpenProfalux\",\"configuration_url\":\"%s\"}}",
+        v->id, slug, slug, slug, pos, slug, s_device, devname, cu);
     mqtt_pub_raw(topic, pl, 1, 1);
     free(pl);
     publish_volet_state(v);
@@ -652,9 +665,13 @@ void shutters_mqtt_on_message(const char *topic, const char *data, int len) {
     const char *after = topic + sizeof(P) - 1;
     const char *slash = strchr(after, '/');
     if (!slash) return;
-    char id[SH_ID_LEN]; int n = slash - after; if (n >= SH_ID_LEN) n = SH_ID_LEN - 1;
-    memcpy(id, after, n); id[n] = 0;
+    char slug[SH_ID_LEN]; int n = slash - after; if (n >= SH_ID_LEN) n = SH_ID_LEN - 1;
+    memcpy(slug, after, n); slug[n] = 0;
     const char *sub = slash + 1;
+    /* le topic porte le SLUG -> on retrouve le vrai volet, puis on commande avec son id reel */
+    volet_t *v = find_volet_by_slug(slug);
+    if (!v) { ESP_LOGW(TAG, "MQTT cmd : volet slug '%s' inconnu", slug); return; }
+    char id[SH_ID_LEN]; strlcpy(id, v->id, sizeof(id));
     char payload[16]; int m = len < 15 ? len : 15; memcpy(payload, data, m); payload[m] = 0;
     if (!strcmp(sub, "set")) {
         if      (!strcasecmp(payload, "OPEN"))  shutters_cmd(id, "up", 0);
