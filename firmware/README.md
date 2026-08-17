@@ -5,7 +5,7 @@ Home Assistant, **sans la clé constructeur** : le firmware **clone** une télé
 existante (capture + rejeu) — le moteur accepte le rejeu (rolling code non contraint).
 
 ## Fonctions
-- **UI web embarquée** (6 onglets) : pilotage, apprentissage, télécommandes, calibration, RF, système.
+- **UI web embarquée** : pilotage, apprentissage, calibration, Wi-Fi, MQTT, OTA, système (RF debug).
 - **Cover Home Assistant** par volet (MQTT discovery) : open/close/stop + position.
 - **Apprentissage** : on capture ▲/▼/■ d'une vraie télécommande et on nomme le volet.
 - **Position estimée par le temps** (calibration montée/descente ; recalage aux butées).
@@ -30,6 +30,21 @@ idf.py set-target esp32 && idf.py build
 ```
 
 ## Flash
+
+### Option A — release pré-compilée (le plus simple, pas d'ESP-IDF)
+Télécharger les binaires de la [dernière release](https://github.com/Shad107/OpenProfalux/releases)
+puis, avec juste `esptool` (`pip install esptool`) :
+
+```bash
+# Board neuf / réinstallation complète : image fusionnée à flasher à 0x0
+esptool.py --chip esp32 -p /dev/ttyUSB0 --baud 460800 write_flash 0x0 openprofalux-full-esp32.bin
+```
+Windows (PowerShell) : `esptool.exe --chip esp32 --port COM4 --baud 115200 write_flash 0x0 openprofalux-full-esp32.bin`
+
+Déjà sous OpenProfalux ? Pas besoin de câble : **onglet OTA → uploader `openprofalux.bin`**
+(binaire applicatif seul), ou pousser son URL via MQTT (`openprofalux/ota/pull`).
+
+### Option B — depuis les sources
 ```bash
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
