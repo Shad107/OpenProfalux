@@ -32,8 +32,9 @@ static void handle_incoming(const char *topic, int tlen, const char *data, int d
     ESP_LOGI(TAG, "RX topic=%s len=%d", t, dlen);
     publish_log("info", t);
 
-    /* Cover HA : openprofalux/cover/<id>/set|set_position -> handler générique */
-    if (strncmp(t, TOPIC_BASE "/cover/", strlen(TOPIC_BASE "/cover/")) == 0) {
+    /* Cover HA + switch "Ecoute RF permanente" -> handler générique shutters */
+    if (strncmp(t, TOPIC_BASE "/cover/", strlen(TOPIC_BASE "/cover/")) == 0
+        || strcmp(t, TOPIC_BASE "/listen/set") == 0) {
         if (s_hdl.on_message) s_hdl.on_message(t, data, dlen);
         return;
     }

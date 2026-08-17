@@ -268,6 +268,7 @@ async function loadConfig() {
     ? `•••••••• (${c.mqtt_pass_len} car. enregistrés, laisser vide pour ne pas changer)`
     : 'mot de passe du broker';
   $('#sys-device').value = c.device || ''; $('#sys-logframes').checked = !!c.log_frames;
+  if ($('#mqtt-device')) $('#mqtt-device').value = c.device || '';
   const st = await api('/api/ota/status').catch(() => ({}));
   $('#ota-version').textContent = st.version || '…';
 }
@@ -280,6 +281,7 @@ $('#wifi-save').onclick = async () => {
 $('#mqtt-save').onclick = async () => {
   const b = { mqtt_uri: $('#mqtt-uri').value.trim(), mqtt_user: $('#mqtt-user').value.trim(), reboot: true };
   if ($('#mqtt-pass').value) b.mqtt_pass = $('#mqtt-pass').value;
+  if ($('#mqtt-device')) b.device = $('#mqtt-device').value.trim();
   await api('/api/config', { method: 'POST', body: JSON.stringify(b) }).catch(() => {});
   toast('MQTT enregistré, redémarrage…');
 };

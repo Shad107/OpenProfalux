@@ -101,6 +101,19 @@ static volet_t *find_volet_by_slug(const char *slug) {
     return NULL;
 }
 
+/* ── Accesseurs dataset (export des trames captees : hops distincts par telecommande) ── */
+int shutters_remote_count(void) { LOCK(); int n = s_nremotes; UNLOCK(); return n; }
+int shutters_remote_dump(int i, char *serial, int sser, char *name, int sname, uint32_t *hops, int maxhops) {
+    LOCK();
+    if (i < 0 || i >= s_nremotes) { UNLOCK(); return -1; }
+    strlcpy(serial, s_remotes[i].serial, sser);
+    strlcpy(name, s_remotes[i].name, sname);
+    int nh = s_remotes[i].nhops; if (nh > maxhops) nh = maxhops;
+    if (nh > 0 && s_remotes[i].hops) memcpy(hops, s_remotes[i].hops, (size_t)nh * sizeof(uint32_t));
+    UNLOCK();
+    return nh < 0 ? 0 : nh;
+}
+
 /* ── Persistance JSON <-> NVS ── */
 /* Serialise toute la config (telecommandes + noms + trames de reference + calibration). */
 static char *cfg_to_json(void) {
@@ -294,6 +307,32 @@ static void announce_one(volet_t *v) {
     mqtt_pub_raw(topic, pl, 1, 1);
     free(pl);
     publish_volet_state(v);
+}
+
+/* Entites HA supplementaires (une seule fois, sous le meme appareil) :
+ * - un SWITCH "Ecoute RF permanente" (on/off depuis HA),
+ * - un CAPTEUR "Derniere trame RF" (voir les trames passer dans HA). */
+static void announce_extras(void) {
+    if (!s_mqtt_ready) return;
+    const char *devname = (!s_device[0] || !strcmp(s_device, "openprofalux")) ? "OpenProfalux" : s_device;
+    char dev[320];
+    snprintf(dev, sizeof(dev),
+        "\"availability_topic\":\"openprofalux/%s/status\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\","
+        "\"device\":{\"identifiers\":[\"openprofalux\"],\"name\":\"%s\",\"manufacturer\":\"isno.fr\",\"model\":\"OpenProfalux\"}",
+        s_device, devname);
+    char *pl = malloc(700); if (!pl) return;
+    snprintf(pl, 700,
+        "{\"name\":\"Ecoute RF permanente\",\"unique_id\":\"openprofalux_listen\",\"object_id\":\"openprofalux_listen\","
+        "\"command_topic\":\"openprofalux/listen/set\",\"state_topic\":\"openprofalux/listen/state\","
+        "\"payload_on\":\"ON\",\"payload_off\":\"OFF\",\"icon\":\"mdi:radio-tower\",%s}", dev);
+    mqtt_pub_raw("homeassistant/switch/openprofalux_listen/config", pl, 1, 1);
+    snprintf(pl, 700,
+        "{\"name\":\"Derniere trame RF\",\"unique_id\":\"openprofalux_last_frame\",\"object_id\":\"openprofalux_last_frame\","
+        "\"state_topic\":\"openprofalux/frames/last\",\"value_template\":\"{{ value_json.hop }}\","
+        "\"json_attributes_topic\":\"openprofalux/frames/last\",\"icon\":\"mdi:remote\",%s}", dev);
+    mqtt_pub_raw("homeassistant/sensor/openprofalux_last_frame/config", pl, 1, 1);
+    free(pl);
+    mqtt_pub_raw("openprofalux/listen/state", s_log_frames ? "ON" : "OFF", 0, 1);
 }
 
 /* ── API commande ── */
@@ -534,7 +573,13 @@ void shutters_on_rx(const char *bits, uint32_t serial, uint8_t button, int8_t rs
     for (int i = 0; i < s_nremotes; i++) if (!strcmp(s_remotes[i].serial, shex)) { known = true; break; }
     if (!known && s_nremotes < 16) { strlcpy(s_remotes[s_nremotes].serial, shex, SH_SERIAL_LEN); s_remotes[s_nremotes].name[0] = 0; s_nremotes++; }
 
-    if (s_log_frames && s_mqtt_ready) dataset_log_frame(shex, button, hop, rssi);  /* fonction 1 (option MQTT) */
+    if (s_log_frames && s_mqtt_ready) {
+        dataset_log_frame(shex, button, hop, rssi);  /* fonction 1 : dataset dedup (compteur retenu) */
+        char lf[112];   /* capteur HA "Derniere trame" : chaque trame visible dans HA */
+        snprintf(lf, sizeof(lf), "{\"serial\":\"%s\",\"button\":\"0x%X\",\"hop\":\"0x%08X\",\"rssi\":%d}",
+                 shex, button, (unsigned)hop, rssi);
+        mqtt_pub_raw("openprofalux/frames/last", lf, 0, 1);
+    }
     track_shutter_position(shex, button);                                          /* fonction 2 (toujours) */
     UNLOCK();
 }
@@ -647,6 +692,7 @@ void shutters_mqtt_announce(const char *device) {
     strlcpy(s_device, (device && *device) ? device : "op", sizeof(s_device));
     s_mqtt_ready = true;
     for (int i = 0; i < s_nvolets; i++) announce_one(&s_volets[i]);
+    announce_extras();           /* switch "Ecoute RF permanente" + capteur "Derniere trame" */
     flush_frame_ring_locked();   /* rattrapage : envoie les dernieres trames du ring des la connexion */
     UNLOCK();
     ESP_LOGI(TAG, "HA discovery publiee pour %d cover(s), device=%s", s_nvolets, s_device);
@@ -660,6 +706,11 @@ void shutters_mqtt_lost(void) {
 }
 
 void shutters_mqtt_on_message(const char *topic, const char *data, int len) {
+    /* Switch HA "Ecoute RF permanente" */
+    if (!strcmp(topic, "openprofalux/listen/set")) {
+        shutters_set_log_frames(len >= 2 && !strncasecmp(data, "ON", 2));   /* publie l'etat + re-annonce */
+        return;
+    }
     static const char P[] = "openprofalux/cover/";
     if (strncmp(topic, P, sizeof(P) - 1)) return;
     const char *after = topic + sizeof(P) - 1;
@@ -700,6 +751,7 @@ void shutters_set_log_frames(bool on) {
     LOCK();
     if (on) flush_frame_ring_locked();                 /* si MQTT deja connecte : rattrape le ring tout de suite */
     for (int i = 0; i < s_nvolets; i++) announce_one(&s_volets[i]);   /* re-publie la decouverte : position apparait/disparait selon l'option */
+    if (s_mqtt_ready) mqtt_pub_raw("openprofalux/listen/state", on ? "ON" : "OFF", 0, 1);   /* etat du switch HA */
     UNLOCK();
     ESP_LOGI(TAG, "log_frames=%d", on);
 }

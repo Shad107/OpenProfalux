@@ -254,6 +254,36 @@ static esp_err_t h_config_post(httpd_req_t *r) {
     return ESP_OK;
 }
 
+/* ── /api/frames : export du dataset de trames (hops distincts par telecommande), chunke ── */
+#define SH_MAX_HOPS_EXPORT 1024   /* aligne sur SH_MAX_HOPS (cap par telecommande) */
+static esp_err_t h_frames(httpd_req_t *r) {
+    httpd_resp_set_type(r, "application/json");
+    httpd_resp_set_hdr(r, "Content-Disposition", "attachment; filename=openprofalux-trames.json");
+    static uint32_t hbuf[SH_MAX_HOPS_EXPORT];
+    char serial[SH_SERIAL_LEN], name[SH_ID_LEN], line[600];
+    httpd_resp_sendstr_chunk(r, "{\"trames\":{");
+    int nr = shutters_remote_count();
+    for (int i = 0; i < nr; i++) {
+        int nh = shutters_remote_dump(i, serial, sizeof(serial), name, sizeof(name), hbuf, SH_MAX_HOPS_EXPORT);
+        if (nh < 0) continue;
+        int p = snprintf(line, sizeof(line), "%s\"%s\":{\"name\":\"%s\",\"count\":%d,\"hops\":[",
+                         i ? "," : "", serial, name, nh);
+        httpd_resp_send_chunk(r, line, p);
+        for (int k = 0; k < nh; ) {
+            p = 0;
+            while (k < nh && p < (int)sizeof(line) - 16) {
+                p += snprintf(line + p, sizeof(line) - p, "%s\"0x%08X\"", k ? "," : "", (unsigned)hbuf[k]);
+                k++;
+            }
+            httpd_resp_send_chunk(r, line, p);
+        }
+        httpd_resp_sendstr_chunk(r, "]}");
+    }
+    httpd_resp_sendstr_chunk(r, "}}");
+    httpd_resp_send_chunk(r, NULL, 0);
+    return ESP_OK;
+}
+
 /* ── /api/backup (export) + /api/restore (import) : telecommandes + trames de reference ── */
 static esp_err_t h_backup(httpd_req_t *r) {
     static char buf[8192];
@@ -384,6 +414,7 @@ void web_ui_start(void) {
     reg(s, "/api/ota/upload",   HTTP_POST, h_ota_upload);
     reg(s, "/api/ota/rollback", HTTP_POST, h_ota_rollback);
     reg(s, "/api/ota/pull",     HTTP_POST, h_ota_pull);
+    reg(s, "/api/frames",       HTTP_GET,  h_frames);
     reg(s, "/api/backup",       HTTP_GET,  h_backup);
     reg(s, "/api/restore",      HTTP_POST, h_restore);
     reg(s, "/api/mqtt/discover", HTTP_GET, h_mqtt_discover);
