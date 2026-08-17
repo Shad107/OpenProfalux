@@ -55,6 +55,9 @@ static void load_config(void) {
     sz = sizeof(s_mqtt_pass);   nvs_get_str(h, "mqtt_pass", s_mqtt_pass, &sz);
     uint8_t lf = 0; nvs_get_u8(h, "log_frames", &lf); s_log_frames = lf;
     nvs_close(h);
+    /* Nom d'appareil vide -> defaut : sinon client_id MQTT vide + topic de disponibilite
+     * qui ne coincide pas avec la decouverte HA. */
+    if (!s_device_name[0]) strlcpy(s_device_name, "openprofalux", sizeof(s_device_name));
 }
 
 /* Publish state JSON */

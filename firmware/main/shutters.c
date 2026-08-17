@@ -234,7 +234,7 @@ static void publish_volet_state(volet_t *v) {
 /* Publie la config HA discovery d'un cover (retained). Appele sous LOCK. */
 static void announce_one(volet_t *v) {
     if (!s_mqtt_ready) return;
-    char topic[128], *pl = malloc(900);
+    char topic[160], *pl = malloc(1536);
     if (!pl) return;
     /* configuration_url = UI web du boitier (via son IP) pour "Visiter l'appareil" dans HA ;
      * repli sur la page projet si l'IP n'est pas connue. */
@@ -248,23 +248,36 @@ static void announce_one(volet_t *v) {
     /* Position exposee a HA UNIQUEMENT si l'ecoute permanente est active (comme dans l'UI web) :
      * sinon un coup de vraie telecommande desynchronise l'estimation, un % faux est pire qu'aucun.
      * Sans l'option, le cover reste pilotable (ouvrir/fermer/stop) mais sans position. */
-    char pos[200] = "";
+    /* slug HA-safe pour object_id / unique_id / topic de decouverte : le nom du volet peut
+     * contenir espaces/accents (ex "Chambre parents"), INTERDITS dans un topic de decouverte
+     * HA -> sinon la config est rejetee silencieusement et l'entite n'apparait jamais. */
+    char slug[SH_ID_LEN]; int sp = 0;
+    for (int k = 0; v->id[k] && sp < (int)sizeof(slug) - 1; k++) {
+        char c = v->id[k];
+        slug[sp++] = ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') ? c : '_';
+    }
+    slug[sp] = 0;
+    if (!sp) strlcpy(slug, "volet", sizeof(slug));
+    /* Position seulement si ecoute permanente (sinon % non fiable) */
+    char pos[240] = "";
     if (s_log_frames)
         snprintf(pos, sizeof(pos),
-            "\"pos_t\":\"openprofalux/cover/%s/position\","
-            "\"set_pos_t\":\"openprofalux/cover/%s/set_position\","
-            "\"pos_open\":100,\"pos_clsd\":0,", v->id, v->id);
-    snprintf(topic, sizeof(topic), "homeassistant/cover/openprofalux_%s_%s/config", s_device, v->id);
-    snprintf(pl, 900,
-        "{\"name\":\"%s\",\"uniq_id\":\"opfx_%s_%s\",\"dev_cla\":\"shutter\","
-        "\"cmd_t\":\"openprofalux/cover/%s/set\","
-        "\"pl_open\":\"OPEN\",\"pl_cls\":\"CLOSE\",\"pl_stop\":\"STOP\","
+            "\"position_topic\":\"openprofalux/cover/%s/position\","
+            "\"set_position_topic\":\"openprofalux/cover/%s/set_position\","
+            "\"position_open\":100,\"position_closed\":0,", v->id, v->id);
+    snprintf(topic, sizeof(topic), "homeassistant/cover/openprofalux_%s_%s/config", s_device, slug);
+    /* Cles en TOUTES LETTRES (alignees sur OpenXtraflame qui fonctionne) ; device PARTAGE
+     * (identifiers commun) -> tous les volets regroupes sous un seul appareil "OpenProfalux". */
+    snprintf(pl, 1536,
+        "{\"name\":\"%s\",\"unique_id\":\"openprofalux_%s_%s\",\"object_id\":\"openprofalux_%s_%s\",\"device_class\":\"shutter\","
+        "\"command_topic\":\"openprofalux/cover/%s/set\","
+        "\"payload_open\":\"OPEN\",\"payload_close\":\"CLOSE\",\"payload_stop\":\"STOP\","
         "%s"
-        "\"stat_t\":\"openprofalux/cover/%s/state\","
-        "\"avty_t\":\"openprofalux/%s/status\",\"pl_avail\":\"online\",\"pl_not_avail\":\"offline\","
-        "\"dev\":{\"ids\":[\"openprofalux_%s\"],\"name\":\"OpenProfalux %s\","
-        "\"mf\":\"isno.fr\",\"mdl\":\"ESP32+CC1101\",\"cu\":\"%s\"}}",
-        v->id, s_device, v->id, v->id, pos, v->id, s_device, s_device, s_device, cu);
+        "\"state_topic\":\"openprofalux/cover/%s/state\","
+        "\"availability_topic\":\"openprofalux/%s/status\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\","
+        "\"device\":{\"identifiers\":[\"openprofalux_%s\"],\"name\":\"OpenProfalux %s\","
+        "\"manufacturer\":\"isno.fr\",\"model\":\"ESP32+CC1101\",\"configuration_url\":\"%s\"}}",
+        v->id, s_device, slug, s_device, slug, v->id, pos, v->id, s_device, s_device, s_device, cu);
     mqtt_pub_raw(topic, pl, 1, 1);
     free(pl);
     publish_volet_state(v);
