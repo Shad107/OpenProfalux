@@ -63,6 +63,8 @@ static SemaphoreHandle_t s_lock;
 static char     s_device[32] = "op";   /* nom appareil (prefixe topics HA) */
 static bool     s_mqtt_ready = false;   /* true apres shutters_mqtt_announce() */
 static bool     s_log_frames = false;   /* publie toutes les trames captees en MQTT */
+static bool     s_frames_dirty = false; /* dataset modifie -> a resauvegarder en NVS */
+#define FRAMES_NVS_MAX 512              /* trames (hops distincts) persistees en NVS (borne, ~4 Ko) */
 
 #define LOCK()   xSemaphoreTake(s_lock, portMAX_DELAY)
 #define UNLOCK() xSemaphoreGive(s_lock)
@@ -153,6 +155,51 @@ static void save_cfg(void) {
         free(js);
     }
 }
+/* Persistance BORNEE du dataset de trames (hops distincts) en NVS : survit au reboot,
+ * mais plafonnee (FRAMES_NVS_MAX) pour ne pas saturer la flash. Le GROS dataset (65536)
+ * doit vivre cote HA (recorder). Sauvegarde periodique (pas a chaque trame -> menage la flash). */
+static void save_frames(void) {
+    static uint32_t buf[FRAMES_NVS_MAX * 2];   /* paires {serial, hop} */
+    int n = 0;
+    LOCK();
+    for (int i = 0; i < s_nremotes && n < FRAMES_NVS_MAX; i++) {
+        uint32_t ser = (uint32_t)strtoul(s_remotes[i].serial, NULL, 16);
+        for (int k = 0; k < s_remotes[i].nhops && n < FRAMES_NVS_MAX; k++) {
+            buf[n * 2] = ser; buf[n * 2 + 1] = s_remotes[i].hops[k]; n++;
+        }
+    }
+    s_frames_dirty = false;
+    UNLOCK();
+    nvs_handle_t h;
+    if (nvs_open("shutters", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_blob(h, "frames", buf, (size_t)n * 2 * sizeof(uint32_t));
+        nvs_commit(h); nvs_close(h);
+    }
+}
+static void load_frames(void) {   /* appele au boot (sous LOCK via shutters_init) apres load_cfg */
+    nvs_handle_t h;
+    if (nvs_open("shutters", NVS_READONLY, &h) != ESP_OK) return;
+    static uint32_t buf[FRAMES_NVS_MAX * 2];
+    size_t sz = sizeof(buf);
+    esp_err_t e = nvs_get_blob(h, "frames", buf, &sz);
+    nvs_close(h);
+    if (e != ESP_OK || sz < 8) return;
+    int n = sz / (2 * sizeof(uint32_t));
+    for (int i = 0; i < n; i++) {
+        char shex[SH_SERIAL_LEN]; snprintf(shex, sizeof(shex), "0x%07X", (unsigned)buf[i * 2]);
+        remote_t *rm = NULL;
+        for (int j = 0; j < s_nremotes; j++) if (!strcmp(s_remotes[j].serial, shex)) { rm = &s_remotes[j]; break; }
+        if (!rm && s_nremotes < 16) { rm = &s_remotes[s_nremotes++]; memset(rm, 0, sizeof(*rm)); strlcpy(rm->serial, shex, SH_SERIAL_LEN); }
+        if (!rm) continue;
+        if (rm->nhops >= rm->caphops && rm->caphops < SH_MAX_HOPS) {
+            uint16_t nc = rm->caphops ? (uint16_t)(rm->caphops * 2) : 32; if (nc > SH_MAX_HOPS) nc = SH_MAX_HOPS;
+            uint32_t *np = realloc(rm->hops, (size_t)nc * sizeof(uint32_t));
+            if (np) { rm->hops = np; rm->caphops = nc; }
+        }
+        if (rm->nhops < rm->caphops) rm->hops[rm->nhops++] = buf[i * 2 + 1];
+    }
+}
+
 /* Remet la config a zero (libere les sets de hops avant reload/import). */
 static void reset_state(void) {
     for (int i = 0; i < s_nremotes; i++) { free(s_remotes[i].hops); s_remotes[i].hops = NULL; s_remotes[i].nhops = s_remotes[i].caphops = 0; }
@@ -376,6 +423,7 @@ int shutters_cmd(const char *id, const char *cmd, int value) {
 /* ── Tache : suivi position + streaming du maintien ── */
 static void tick_task(void *arg) {
     (void)arg;
+    int save_ticks = 0;
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(TICK_MS));
         LOCK();
@@ -401,6 +449,11 @@ static void tick_task(void *arg) {
                 publish_volet_state(v);
         }
         UNLOCK();
+        /* sauvegarde periodique du dataset en NVS (hors LOCK ; menage la flash : ~60 s si modifie) */
+        if (++save_ticks * TICK_MS >= 60000) {
+            save_ticks = 0;
+            if (s_frames_dirty) save_frames();
+        }
     }
 }
 
@@ -512,7 +565,7 @@ static void dataset_log_frame(const char *shex, uint8_t button, uint32_t hop, in
         uint32_t *np = realloc(rm->hops, (size_t)nc * sizeof(uint32_t));
         if (np) { rm->hops = np; rm->caphops = nc; }
     }
-    if (rm->nhops < rm->caphops) rm->hops[rm->nhops++] = hop;
+    if (rm->nhops < rm->caphops) { rm->hops[rm->nhops++] = hop; s_frames_dirty = true; }   /* a resauvegarder en NVS */
     char topic[64], pl[160];
     snprintf(topic, sizeof(topic), "openprofalux/frames/%s", shex);
     snprintf(pl, sizeof(pl), "{\"button\":%u,\"hop\":\"0x%08X\",\"rssi\":%d,\"distinct\":%u}",
@@ -764,6 +817,7 @@ static void on_air(const char *bits, uint32_t serial, uint8_t button, uint32_t h
 void shutters_init(void) {
     s_lock = xSemaphoreCreateMutex();
     load_cfg();
+    load_frames();   /* restaure le dataset de trames borne persiste en NVS (survit au reboot) */
     xTaskCreate(tick_task, "sh_tick", 4096, NULL, 5, NULL);
     radio_init();
     radio_start(on_air);   /* tache radio prete (arbitre TX) */
