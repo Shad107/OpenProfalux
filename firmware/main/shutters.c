@@ -581,6 +581,7 @@ int shutters_status_json(char *buf, int cap) {
     }
     cJSON_AddBoolToObject(root, "mqtt", s_mqtt_ready);
     cJSON_AddBoolToObject(root, "listening", s_log_frames);   /* ecoute permanente = position fiable */
+    cJSON_AddNumberToObject(root, "uptime", (double)(esp_timer_get_time() / 1000000));   /* s depuis boot : date les trames RF cote UI */
     char *js = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     int n = 0;
@@ -623,6 +624,13 @@ void shutters_mqtt_announce(const char *device) {
     flush_frame_ring_locked();   /* rattrapage : envoie les dernieres trames du ring des la connexion */
     UNLOCK();
     ESP_LOGI(TAG, "HA discovery publiee pour %d cover(s), device=%s", s_nvolets, s_device);
+}
+
+void shutters_mqtt_lost(void) {
+    LOCK();
+    s_mqtt_ready = false;   /* broker perdu : le statut UI repasse a deconnecte */
+    UNLOCK();
+    ESP_LOGW(TAG, "MQTT perdu : statut hors ligne");
 }
 
 void shutters_mqtt_on_message(const char *topic, const char *data, int len) {

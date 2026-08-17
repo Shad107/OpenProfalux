@@ -23,6 +23,7 @@ function applyRoute() {
   if (!activateMain(main)) { activateMain('control'); return; }
   const sec = $(`.panel[data-p="${main}"]`);
   if (sub && sec) activateSub(sec, sub);
+  if (typeof loadStatus === 'function') loadStatus();   /* refresh immediat a chaque changement d'onglet (ex: RF debug) */
 }
 $$('.tab').forEach(t => t.onclick = () => { location.hash = t.dataset.t; });
 $$('.subtab').forEach(t => t.onclick = () => {
@@ -379,9 +380,13 @@ async function loadStatus() {
   if (!learning) { renderVoletPicker(); renderLearnSlots(); }
   wifiStatusLine(s.wifi); mqttStatusLine(s.mqtt);
   const ci = $('#calib-info'); if (ci) ci.hidden = !!s.listening;   /* bandeau visible seulement si option OFF */
-  const tb = $('#rf'); if (tb) tb.innerHTML = rf.map(f =>
-    `<tr><td class="m">${f.t}</td><td title="${esc(f.serial)}">${esc(remoteName(f.serial))}</td>
-      <td><span class="badge">0x${esc(f.button)}</span></td><td class="m">0x${esc(f.hop)}</td><td class="m">${f.rssi} dBm</td></tr>`).join('');
+  const up = s.uptime || 0;   /* uptime boitier -> on date les trames via l'horloge du navigateur */
+  const tb = $('#rf'); if (tb) tb.innerHTML = rf.map(f => {
+    const when = new Date(Date.now() - Math.max(0, up - f.t) * 1000);
+    const ts = when.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    return `<tr><td class="m">${ts}</td><td title="${esc(f.serial)}">${esc(remoteName(f.serial))}</td>
+      <td><span class="badge">0x${esc(f.button)}</span></td><td class="m">0x${esc(f.hop)}</td><td class="m">${f.rssi} dBm</td></tr>`;
+  }).join('');
 }
 applyRoute();
 loadStatus();

@@ -89,6 +89,11 @@ static void mqtt_event_cb(void *arg, esp_event_base_t base, int32_t id, void *ev
             esp_mqtt_client_subscribe(s_mqtt, TOPIC_BASE "/ota/pull", 1);
             mqtt_pub_system_status();
             publish_log("info", "MQTT connected");
+            if (s_hdl.on_connected) s_hdl.on_connected();   /* -> publie la decouverte HA (vraie connexion) */
+            break;
+        case MQTT_EVENT_DISCONNECTED:
+            ESP_LOGW(TAG, "MQTT disconnected");
+            if (s_hdl.on_disconnected) s_hdl.on_disconnected();
             break;
         case MQTT_EVENT_DATA:
             handle_incoming(evt->topic, evt->topic_len, evt->data, evt->data_len);
@@ -103,8 +108,15 @@ static void mqtt_event_cb(void *arg, esp_event_base_t base, int32_t id, void *ev
 int mqtt_bridge_start(const char *broker_uri, const char *client_id, const char *user, const char *pass) {
     strncpy(s_client_id, client_id, sizeof(s_client_id) - 1);
     snprintf(s_avail_topic, sizeof(s_avail_topic), TOPIC_BASE "/%s/status", client_id);
+    /* Le client MQTT exige une URI avec schema (mqtt://host[:port]). Si l'utilisateur a saisi
+     * une IP nue, on prefixe mqtt:// automatiquement (sinon "Error parse uri" -> jamais connecte). */
+    static char s_uri[128];
+    if (broker_uri && *broker_uri && !strstr(broker_uri, "://"))
+        snprintf(s_uri, sizeof(s_uri), "mqtt://%s", broker_uri);
+    else
+        snprintf(s_uri, sizeof(s_uri), "%s", broker_uri ? broker_uri : "");
     esp_mqtt_client_config_t cfg = {
-        .broker.address.uri = broker_uri,
+        .broker.address.uri = s_uri,
         .credentials.client_id = client_id,
         .credentials.username = user,
         .credentials.authentication.password = pass,

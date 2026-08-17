@@ -43,6 +43,7 @@ int  shutters_status_json(char *buf, int cap);
 /* ── Integration Home Assistant (MQTT) ── */
 /* Publie la discovery HA (1 cover par volet) + l'etat courant. A appeler apres connexion MQTT. */
 void shutters_mqtt_announce(const char *device);
+void shutters_mqtt_lost(void);   /* broker perdu -> statut hors ligne */
 /* Route une commande HA cover recue en MQTT : openprofalux/cover/<id>/set|set_position. */
 void shutters_mqtt_on_message(const char *topic, const char *data, int len);
 /* Active/desactive la publication MQTT de TOUTES les trames captees (dedup par serial). */

@@ -45,6 +45,8 @@ typedef struct {
     void (*on_listen_stop)(void);
     void (*on_message)(const char *topic, const char *data, int len); /* cover HA : openprofalux/cover/# */
     void (*on_ota_pull)(const char *url);                             /* openprofalux/ota/pull */
+    void (*on_connected)(void);                                       /* broker connecte : publier la decouverte */
+    void (*on_disconnected)(void);                                    /* broker perdu : statut hors ligne */
 } mqtt_handlers_t;
 
 int  mqtt_bridge_set_handlers(const mqtt_handlers_t *h);

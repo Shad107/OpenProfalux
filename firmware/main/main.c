@@ -106,6 +106,9 @@ static void on_ota_pull(const char *url) {
     ESP_LOGI(TAG, "▶ OTA pull depuis %s", url);
     ota_pull_from_url(url);
 }
+static void on_mqtt_connected(void) {
+    shutters_mqtt_announce(s_device_name);   /* publie la decouverte HA a la VRAIE connexion broker */
+}
 
 /* NB : l'ancien chemin RX MQTT (rx_frame_cb / on_listen_start / on_listen_stop +
  * cc1101_rx_start) est remplace par le module radio (RX permanent arbitre), demarre
@@ -175,18 +178,19 @@ void app_main(void) {
 
     /* 6. MQTT */
     if (wifi_bridge_is_connected() && strlen(s_mqtt_uri) > 0) {
-        mqtt_bridge_start(s_mqtt_uri, s_device_name,
-                          strlen(s_mqtt_user) ? s_mqtt_user : NULL,
-                          strlen(s_mqtt_pass) ? s_mqtt_pass : NULL);
+        /* Handlers AVANT le start : la decouverte HA est publiee sur l'evenement CONNECTED
+         * (vraie connexion), plus au boot a l'aveugle. Le statut UI suit CONNECTED/DISCONNECTED. */
         mqtt_handlers_t h = {
             .on_pair = on_pair, .on_reset = on_reset, .on_cmd = on_cmd,
             .on_message = shutters_mqtt_on_message,   /* cover HA */
             .on_ota_pull = on_ota_pull,               /* OTA pull */
+            .on_connected = on_mqtt_connected,        /* -> publie la decouverte HA */
+            .on_disconnected = shutters_mqtt_lost,    /* -> statut hors ligne */
         };
         mqtt_bridge_set_handlers(&h);
-        vTaskDelay(pdMS_TO_TICKS(2000));  /* let MQTT connect */
-        shutters_mqtt_announce(s_device_name);   /* 1 cover HA par volet appris */
-        publish_state("BOOT");
+        mqtt_bridge_start(s_mqtt_uri, s_device_name,
+                          strlen(s_mqtt_user) ? s_mqtt_user : NULL,
+                          strlen(s_mqtt_pass) ? s_mqtt_pass : NULL);
     }
 
     /* Trigger LOCAL pour le test d'enrolement (pas besoin de MQTT/WiFi) :
