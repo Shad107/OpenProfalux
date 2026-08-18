@@ -421,17 +421,17 @@ static void do_stop(volet_t *v) {
 /* Sync depuis une commande EXTERNE (vraie telecommande) : suit sans emettre.
  * Le moteur part vers la butee (target) ; l'arret intermediaire vient du STOP (freeze). */
 static void track_move(volet_t *v, int dir) {
-    v->dir = dir; v->own_move = false; v->target = (dir > 0) ? 100 : 0;
+    v->dir = dir; v->own_move = false; v->target = (dir > 0) ? 0 : 100;   /* monter -> fermeture 0, descendre -> 100 */
     v->last_tick_us = esp_timer_get_time();
 }
 static void freeze(volet_t *v) { v->dir = 0; v->target = -1; }
 
 /* ── Home Assistant : discovery + etat (MQTT) ── */
 static void ha_state_str(const volet_t *v, char *out) {
-    if      (v->dir > 0)          strcpy(out, "opening");
-    else if (v->dir < 0)          strcpy(out, "closing");
-    else if (v->position >= 99)   strcpy(out, "open");
-    else if (v->position <= 1)    strcpy(out, "closed");
+    if      (v->dir > 0)          strcpy(out, "opening");   /* monte = ouvre */
+    else if (v->dir < 0)          strcpy(out, "closing");   /* descend = ferme */
+    else if (v->position <= 1)    strcpy(out, "open");      /* fermeture 0 = ouvert (haut) */
+    else if (v->position >= 99)   strcpy(out, "closed");    /* fermeture 100 = ferme (bas) */
     else                          strcpy(out, "stopped");
 }
 /* Publie position + etat du volet (retained). Appele sous LOCK. */
@@ -441,7 +441,7 @@ static void publish_volet_state(volet_t *v) {
     slugify(slug, sizeof(slug), v->id);   /* topics slugifies (coherents avec la decouverte) */
     if (s_log_frames) {   /* position publiee seulement si suivi actif (coherent avec la decouverte + l'UI) */
         snprintf(topic, sizeof(topic), "openprofalux/cover/%s/position", slug);
-        snprintf(pl, sizeof(pl), "%d", (int)(v->position + 0.5f));
+        snprintf(pl, sizeof(pl), "%d", 100 - (int)(v->position + 0.5f));   /* HA = % d'OUVERTURE (100=ouvert) ; interne = fermeture */
         mqtt_pub_raw(topic, pl, 0, 1);
     }
     ha_state_str(v, st);
@@ -544,15 +544,16 @@ int shutters_cmd(const char *id, const char *cmd, int value) {
     if (!v) { ESP_LOGW(TAG, "CMD '%s' : volet '%s' introuvable", cmd, id ? id : "(null)"); UNLOCK(); return -1; }
     ESP_LOGW(TAG, "CMD %s '%s' (up=%dc stop=%dc down=%dc)", cmd, id,
              (int)strlen(v->up), (int)strlen(v->stop), (int)strlen(v->down));
-    if (!strcmp(cmd, "up"))        { v->target = 100; start_move(v, +1); }
-    else if (!strcmp(cmd, "down")) { v->target = 0;   start_move(v, -1); }
+    /* position = % de FERMETURE (0 = ouvert/haut, 100 = ferme/bas). */
+    if (!strcmp(cmd, "up"))        { v->target = 0;   start_move(v, +1); }   /* ouvrir : monter vers 0 */
+    else if (!strcmp(cmd, "down")) { v->target = 100; start_move(v, -1); }   /* fermer : descendre vers 100 */
     else if (!strcmp(cmd, "stop")) { do_stop(v); }
-    else if (!strcmp(cmd, "pos"))  {
+    else if (!strcmp(cmd, "pos"))  {   /* value = % de fermeture voulu */
         if (value < 0) value = 0;
         if (value > 100) value = 100;
         v->target = value;
-        if (value > v->position + 1)      start_move(v, +1);
-        else if (value < v->position - 1) start_move(v, -1);
+        if (value > v->position + 1)      start_move(v, -1);   /* plus ferme -> descendre */
+        else if (value < v->position - 1) start_move(v, +1);   /* plus ouvert -> monter */
         else v->dir = 0;
     }
     publish_volet_state(v);
@@ -575,12 +576,14 @@ static void tick_task(void *arg) {
             if (travel < 500) travel = 18000;   /* defaut si non calibre */
             float dms = (now - v->last_tick_us) / 1000.0f;
             v->last_tick_us = now;
-            v->position += v->dir * (dms / travel) * 100.0f;
+            /* Convention : position = % de FERMETURE. 0 = ouvert (haut), 100 = ferme (bas).
+             * Monter (dir=+1) DIMINUE la position ; descendre (dir=-1) l'augmente -> d'ou le -=. */
+            v->position -= v->dir * (dms / travel) * 100.0f;
             if (v->position < 0) v->position = 0;
             if (v->position > 100) v->position = 100;
-            /* cible atteinte ou butee -> stop */
-            int reached = (v->dir > 0 && (v->position >= 100 || (v->target >= 0 && v->position >= v->target)))
-                       || (v->dir < 0 && (v->position <= 0   || (v->target >= 0 && v->position <= v->target)));
+            /* cible atteinte ou butee -> stop (monter -> vers 0 ; descendre -> vers 100) */
+            int reached = (v->dir > 0 && (v->position <= 0   || (v->target >= 0 && v->position <= v->target)))
+                       || (v->dir < 0 && (v->position >= 100 || (v->target >= 0 && v->position >= v->target)));
             if (reached) {
                 if (!v->own_move) freeze(v);                                /* mouvement externe : on fige le suivi */
                 else if (v->target > 0 && v->target < 100) do_stop(v);      /* notre commande vers une position INTERMEDIAIRE : STOP pour figer */
@@ -964,7 +967,7 @@ void shutters_mqtt_on_message(const char *topic, const char *data, int len) {
         else if (!strcasecmp(payload, "CLOSE")) shutters_cmd(id, "down", 0);
         else if (!strcasecmp(payload, "STOP"))  shutters_cmd(id, "stop", 0);
     } else if (!strcmp(sub, "set_position")) {
-        shutters_cmd(id, "pos", atoi(payload));
+        shutters_cmd(id, "pos", 100 - atoi(payload));   /* HA envoie le % d'ouverture -> on convertit en fermeture */
     }
 }
 
