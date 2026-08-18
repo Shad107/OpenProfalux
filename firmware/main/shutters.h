@@ -49,9 +49,10 @@ int  shutters_status_json(char *buf, int cap);
 /* Publie la discovery HA (1 cover par volet) + l'etat courant. A appeler apres connexion MQTT. */
 void shutters_mqtt_announce(const char *device);
 void shutters_mqtt_lost(void);   /* broker perdu -> statut hors ligne */
-/* Export dataset : parcours des telecommandes vues et de leurs hops distincts. */
+/* Export dataset slide : par telecommande, ses trames distinctes {hop, bouton, t} (tout brut). */
+typedef struct { uint32_t hop; uint32_t t; uint8_t button; } dframe_t;
 int  shutters_remote_count(void);
-int  shutters_remote_dump(int i, char *serial, int sser, char *name, int sname, uint32_t *hops, int maxhops);
+int  shutters_remote_dump(int i, char *serial, int sser, char *name, int sname, dframe_t *frames, int maxframes);
 /* Route une commande HA cover recue en MQTT : openprofalux/cover/<id>/set|set_position. */
 void shutters_mqtt_on_message(const char *topic, const char *data, int len);
 /* Active/desactive la publication MQTT de TOUTES les trames captees (dedup par serial). */

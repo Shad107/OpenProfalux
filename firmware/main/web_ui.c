@@ -266,25 +266,27 @@ static esp_err_t h_config_post(httpd_req_t *r) {
     return ESP_OK;
 }
 
-/* ── /api/frames : export du dataset de trames (hops distincts par telecommande), chunke ── */
+/* ── /api/frames : export du dataset slide (par telecommande : {hop, button, t} par trame), chunke.
+ * hop = ciphertext C (brut) ; button + t (ordre = compteur) permettent de reconstruire le plaintext P. ── */
 #define SH_MAX_HOPS_EXPORT 1024   /* aligne sur SH_MAX_HOPS (cap par telecommande) */
 static esp_err_t h_frames(httpd_req_t *r) {
     httpd_resp_set_type(r, "application/json");
     httpd_resp_set_hdr(r, "Content-Disposition", "attachment; filename=openprofalux-trames.json");
-    static uint32_t hbuf[SH_MAX_HOPS_EXPORT];
+    static dframe_t fbuf[SH_MAX_HOPS_EXPORT];
     char serial[SH_SERIAL_LEN], name[SH_ID_LEN], line[600];
     httpd_resp_sendstr_chunk(r, "{\"trames\":{");
     int nr = shutters_remote_count();
     for (int i = 0; i < nr; i++) {
-        int nh = shutters_remote_dump(i, serial, sizeof(serial), name, sizeof(name), hbuf, SH_MAX_HOPS_EXPORT);
+        int nh = shutters_remote_dump(i, serial, sizeof(serial), name, sizeof(name), fbuf, SH_MAX_HOPS_EXPORT);
         if (nh < 0) continue;
-        int p = snprintf(line, sizeof(line), "%s\"%s\":{\"name\":\"%s\",\"count\":%d,\"hops\":[",
+        int p = snprintf(line, sizeof(line), "%s\"%s\":{\"name\":\"%s\",\"count\":%d,\"frames\":[",
                          i ? "," : "", serial, name, nh);
         httpd_resp_send_chunk(r, line, p);
         for (int k = 0; k < nh; ) {
             p = 0;
-            while (k < nh && p < (int)sizeof(line) - 16) {
-                p += snprintf(line + p, sizeof(line) - p, "%s\"0x%08X\"", k ? "," : "", (unsigned)hbuf[k]);
+            while (k < nh && p < (int)sizeof(line) - 64) {
+                p += snprintf(line + p, sizeof(line) - p, "%s{\"hop\":\"0x%08X\",\"button\":\"0x%X\",\"t\":%u}",
+                              k ? "," : "", (unsigned)fbuf[k].hop, fbuf[k].button, (unsigned)fbuf[k].t);
                 k++;
             }
             httpd_resp_send_chunk(r, line, p);

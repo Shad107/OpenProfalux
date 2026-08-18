@@ -44,10 +44,11 @@ typedef struct {
     int   pub_dir;           /* derniere direction publiee MQTT */
 } volet_t;
 
+/* dframe_t (trame distincte du dataset slide : hop brut + bouton + t) est defini dans shutters.h. */
 typedef struct {
     char serial[SH_SERIAL_LEN]; char name[SH_ID_LEN];
     uint32_t  last_hop;      /* fast-path : dernier hop (evite le scan sur les maintiens) */
-    uint32_t *hops;          /* SET des hopping codes deja enregistres (dedup complet) */
+    dframe_t *hops;          /* SET des trames distinctes (dedup par hop) : hop + bouton + t */
     uint16_t  nhops;         /* = nb de trames DISTINCTES loggees */
     uint16_t  caphops;       /* capacite allouee du set */
 } remote_t;
@@ -111,13 +112,13 @@ static volet_t *find_volet_by_slug(const char *slug) {
 
 /* ── Accesseurs dataset (export des trames captees : hops distincts par telecommande) ── */
 int shutters_remote_count(void) { LOCK(); int n = s_nremotes; UNLOCK(); return n; }
-int shutters_remote_dump(int i, char *serial, int sser, char *name, int sname, uint32_t *hops, int maxhops) {
+int shutters_remote_dump(int i, char *serial, int sser, char *name, int sname, dframe_t *frames, int maxframes) {
     LOCK();
     if (i < 0 || i >= s_nremotes) { UNLOCK(); return -1; }
     strlcpy(serial, s_remotes[i].serial, sser);
     strlcpy(name, s_remotes[i].name, sname);
-    int nh = s_remotes[i].nhops; if (nh > maxhops) nh = maxhops;
-    if (nh > 0 && s_remotes[i].hops) memcpy(hops, s_remotes[i].hops, (size_t)nh * sizeof(uint32_t));
+    int nh = s_remotes[i].nhops; if (nh > maxframes) nh = maxframes;
+    if (nh > 0 && s_remotes[i].hops) memcpy(frames, s_remotes[i].hops, (size_t)nh * sizeof(dframe_t));
     UNLOCK();
     return nh < 0 ? 0 : nh;
 }
@@ -166,44 +167,45 @@ static void save_cfg(void) {
  * mais plafonnee (FRAMES_NVS_MAX) pour ne pas saturer la flash. Le GROS dataset (65536)
  * doit vivre cote HA (recorder). Sauvegarde periodique (pas a chaque trame -> menage la flash). */
 static void save_frames(void) {
-    static uint32_t buf[FRAMES_NVS_MAX * 2];   /* paires {serial, hop} */
+    static uint32_t buf[FRAMES_NVS_MAX * 4];   /* records {serial, hop, t, bouton} */
     int n = 0;
     LOCK();
     for (int i = 0; i < s_nremotes && n < FRAMES_NVS_MAX; i++) {
         uint32_t ser = (uint32_t)strtoul(s_remotes[i].serial, NULL, 16);
         for (int k = 0; k < s_remotes[i].nhops && n < FRAMES_NVS_MAX; k++) {
-            buf[n * 2] = ser; buf[n * 2 + 1] = s_remotes[i].hops[k]; n++;
+            dframe_t *d = &s_remotes[i].hops[k];
+            buf[n * 4] = ser; buf[n * 4 + 1] = d->hop; buf[n * 4 + 2] = d->t; buf[n * 4 + 3] = d->button; n++;
         }
     }
     s_frames_dirty = false;
     UNLOCK();
     nvs_handle_t h;
     if (nvs_open("shutters", NVS_READWRITE, &h) == ESP_OK) {
-        nvs_set_blob(h, "frames", buf, (size_t)n * 2 * sizeof(uint32_t));
+        nvs_set_blob(h, "framesv2", buf, (size_t)n * 4 * sizeof(uint32_t));
         nvs_commit(h); nvs_close(h);
     }
 }
 static void load_frames(void) {   /* appele au boot (sous LOCK via shutters_init) apres load_cfg */
     nvs_handle_t h;
     if (nvs_open("shutters", NVS_READONLY, &h) != ESP_OK) return;
-    static uint32_t buf[FRAMES_NVS_MAX * 2];
+    static uint32_t buf[FRAMES_NVS_MAX * 4];
     size_t sz = sizeof(buf);
-    esp_err_t e = nvs_get_blob(h, "frames", buf, &sz);
+    esp_err_t e = nvs_get_blob(h, "framesv2", buf, &sz);
     nvs_close(h);
-    if (e != ESP_OK || sz < 8) return;
-    int n = sz / (2 * sizeof(uint32_t));
+    if (e != ESP_OK || sz < 16) return;
+    int n = sz / (4 * sizeof(uint32_t));
     for (int i = 0; i < n; i++) {
-        char shex[SH_SERIAL_LEN]; snprintf(shex, sizeof(shex), "0x%07X", (unsigned)buf[i * 2]);
+        char shex[SH_SERIAL_LEN]; snprintf(shex, sizeof(shex), "0x%07X", (unsigned)buf[i * 4]);
         remote_t *rm = NULL;
         for (int j = 0; j < s_nremotes; j++) if (!strcmp(s_remotes[j].serial, shex)) { rm = &s_remotes[j]; break; }
         if (!rm && s_nremotes < 16) { rm = &s_remotes[s_nremotes++]; memset(rm, 0, sizeof(*rm)); strlcpy(rm->serial, shex, SH_SERIAL_LEN); }
         if (!rm) continue;
         if (rm->nhops >= rm->caphops && rm->caphops < SH_MAX_HOPS) {
             uint16_t nc = rm->caphops ? (uint16_t)(rm->caphops * 2) : 32; if (nc > SH_MAX_HOPS) nc = SH_MAX_HOPS;
-            uint32_t *np = realloc(rm->hops, (size_t)nc * sizeof(uint32_t));
+            dframe_t *np = realloc(rm->hops, (size_t)nc * sizeof(dframe_t));
             if (np) { rm->hops = np; rm->caphops = nc; }
         }
-        if (rm->nhops < rm->caphops) rm->hops[rm->nhops++] = buf[i * 2 + 1];
+        if (rm->nhops < rm->caphops) rm->hops[rm->nhops++] = (dframe_t){ .hop = buf[i * 4 + 1], .t = buf[i * 4 + 2], .button = (uint8_t)buf[i * 4 + 3] };
     }
 }
 
@@ -280,13 +282,13 @@ static void ring_fill_from_mqtt(int slot, const char *ser, uint8_t button, uint3
         if (!rm && s_nremotes < 16) { rm = &s_remotes[s_nremotes++]; memset(rm, 0, sizeof(*rm)); strlcpy(rm->serial, ser, SH_SERIAL_LEN); }
         if (rm) {
             bool isnew = true;
-            for (int i = 0; i < rm->nhops; i++) if (rm->hops[i] == hop) { isnew = false; break; }
+            for (int i = 0; i < rm->nhops; i++) if (rm->hops[i].hop == hop) { isnew = false; break; }
             if (isnew) {
                 if (rm->nhops >= rm->caphops && rm->caphops < SH_MAX_HOPS) {
                     uint16_t nc = rm->caphops ? (uint16_t)(rm->caphops * 2) : 32; if (nc > SH_MAX_HOPS) nc = SH_MAX_HOPS;
-                    uint32_t *np = realloc(rm->hops, (size_t)nc * sizeof(uint32_t)); if (np) { rm->hops = np; rm->caphops = nc; }
+                    dframe_t *np = realloc(rm->hops, (size_t)nc * sizeof(dframe_t)); if (np) { rm->hops = np; rm->caphops = nc; }
                 }
-                if (rm->nhops < rm->caphops) { rm->hops[rm->nhops++] = hop; s_frames_dirty = true; }
+                if (rm->nhops < rm->caphops) { rm->hops[rm->nhops++] = (dframe_t){ .hop = hop, .t = t, .button = button }; s_frames_dirty = true; }
             }
         }
     }
@@ -677,23 +679,23 @@ int shutters_remote_name(const char *serial, const char *name) {
 /* ══ FONCTION 1 — Dataset slide (option MQTT "capture toutes les trames") ══
  * Publie un hop UNIQUEMENT s'il n'est pas deja dans le set enregistre de ce serial.
  * Sert a collecter les 65536 hops distincts pour l'attaque slide-MITM. Appele sous LOCK. */
-static void dataset_log_frame(const char *shex, uint8_t button, uint32_t hop, int8_t rssi) {
+static void dataset_log_frame(const char *shex, uint8_t button, uint32_t hop, int8_t rssi, uint32_t t) {
     remote_t *rm = NULL;
     for (int i = 0; i < s_nremotes; i++) if (!strcmp(s_remotes[i].serial, shex)) { rm = &s_remotes[i]; break; }
     if (!rm) return;
     bool is_new = true;
     if (rm->nhops && rm->last_hop == hop) is_new = false;                      /* fast-path maintien */
-    else for (int i = 0; i < rm->nhops; i++) if (rm->hops[i] == hop) { is_new = false; break; }
+    else for (int i = 0; i < rm->nhops; i++) if (rm->hops[i].hop == hop) { is_new = false; break; }
     rm->last_hop = hop;
     if (!is_new) return;                                                       /* deja enregistre -> rien */
     /* ajoute au set (croissance bornee a SH_MAX_HOPS) */
     if (rm->nhops >= rm->caphops && rm->caphops < SH_MAX_HOPS) {
         uint16_t nc = rm->caphops ? (uint16_t)(rm->caphops * 2) : 32;
         if (nc > SH_MAX_HOPS) nc = SH_MAX_HOPS;
-        uint32_t *np = realloc(rm->hops, (size_t)nc * sizeof(uint32_t));
+        dframe_t *np = realloc(rm->hops, (size_t)nc * sizeof(dframe_t));
         if (np) { rm->hops = np; rm->caphops = nc; }
     }
-    if (rm->nhops < rm->caphops) { rm->hops[rm->nhops++] = hop; s_frames_dirty = true; }   /* a resauvegarder en NVS */
+    if (rm->nhops < rm->caphops) { rm->hops[rm->nhops++] = (dframe_t){ .hop = hop, .t = t, .button = button }; s_frames_dirty = true; }
     /* Plus de publication frames/<serial> ni /count : une seule structure MQTT = l'anneau frames/log/<n>.
      * Le dataset slide (hops distincts) reste construit ici en RAM/NVS pour l'export /api/frames. */
 }
@@ -709,7 +711,7 @@ static void flush_frame_ring_locked(void) {
         int slot = (s_rfhead + k) % RF_RING;
         rfrec_t *r = &s_rf[slot];
         if (!r->serial[0]) continue;
-        dataset_log_frame(r->serial, r->button, r->hop, r->rssi);   /* dataset slide (dedup) */
+        dataset_log_frame(r->serial, r->button, r->hop, r->rssi, r->t);   /* dataset slide (dedup) */
         snprintf(lf, sizeof(lf), "{\"serial\":\"%s\",\"button\":\"0x%X\",\"hop\":\"0x%08X\",\"rssi\":%d,\"t\":%u}",
                  r->serial, r->button, (unsigned)r->hop, r->rssi, (unsigned)r->t);
         snprintf(lt, sizeof(lt), "openprofalux/frames/log/%d", slot);
@@ -762,7 +764,7 @@ void shutters_on_rx(const char *bits, uint32_t serial, uint8_t button, int8_t rs
     if (!known && s_nremotes < 16) { strlcpy(s_remotes[s_nremotes].serial, shex, SH_SERIAL_LEN); s_remotes[s_nremotes].name[0] = 0; s_nremotes++; }
 
     if (s_log_frames && s_mqtt_ready) {
-        dataset_log_frame(shex, button, hop, rssi);  /* fonction 1 : dataset dedup (compteur retenu) */
+        dataset_log_frame(shex, button, hop, rssi, r->t);  /* fonction 1 : dataset dedup (bouton+t pour le slide) */
         char lf[128];
         snprintf(lf, sizeof(lf), "{\"serial\":\"%s\",\"button\":\"0x%X\",\"hop\":\"0x%08X\",\"rssi\":%d,\"t\":%u}",
                  shex, button, (unsigned)hop, rssi, (unsigned)r->t);

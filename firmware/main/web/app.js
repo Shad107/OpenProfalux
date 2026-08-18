@@ -38,11 +38,11 @@ async function loadFrames() {
     return;
   }
   box.innerHTML = Object.entries(fr).map(([serial, info]) => {
-    const hops = info.hops || [];
-    const shown = hops.slice(0, 300).map(h => `<code>${esc(h)}</code>`).join(' ');
-    const more = hops.length > 300 ? ` <span class="hint">+${hops.length - 300} autres</span>` : '';
+    const frames = info.frames || [];
+    const shown = frames.slice(0, 300).map(f => `<code title="bouton ${esc(f.button)}">${esc(f.hop)}</code>`).join(' ');
+    const more = frames.length > 300 ? ` <span class="hint">+${frames.length - 300} autres</span>` : '';
     return `<div class="card" style="margin-top:8px;padding:10px 12px"><b>${esc(remoteName(serial))}</b>
-      <span class="hint">· ${info.count} trame(s) distincte(s)</span><div class="hops">${shown}${more}</div></div>`;
+      <span class="hint">· ${info.count} trame(s) distincte(s) · hop + bouton + t (slide)</span><div class="hops">${shown}${more}</div></div>`;
   }).join('');
 }
 if ($('#frames-reload')) $('#frames-reload').onclick = loadFrames;
