@@ -781,6 +781,7 @@ static void track_shutter_position(const char *shex, uint8_t button) {
 void shutters_on_rx(const char *bits, uint32_t serial, uint8_t button, int8_t rssi, uint32_t hop) {
     ESP_LOGI(TAG, "RX serial=0x%07X bouton=0x%X hop=0x%08X rssi=%d dBm",
              (unsigned)serial, button, (unsigned)hop, rssi);
+    bool do_pub = false; int pub_slot = -1; char pub_lf[128];   /* publie APRES UNLOCK (anti-deadlock) */
     LOCK();
     char shex[SH_SERIAL_LEN]; snprintf(shex, sizeof(shex), "0x%07X", (unsigned)serial);
     (void)bits;   /* plus stocke : les 66 bits sont reconstruits a la demande (rejeu/adoption) */
@@ -800,16 +801,23 @@ void shutters_on_rx(const char *bits, uint32_t serial, uint8_t button, int8_t rs
         if (!known && s_nremotes < 16) { strlcpy(s_remotes[s_nremotes].serial, shex, SH_SERIAL_LEN); s_remotes[s_nremotes].name[0] = 0; s_nremotes++; }
         if (s_log_frames && s_mqtt_ready) {
             dataset_log_frame(shex, button, hop, rssi, t);  /* dataset slide (dedup par hop, bouton+t) */
-            char lf[128];
-            snprintf(lf, sizeof(lf), "{\"serial\":\"%s\",\"button\":\"0x%X\",\"hop\":\"0x%08X\",\"rssi\":%d,\"t\":%u}",
+            /* On PREPARE le payload ici, mais on PUBLIE hors du LOCK (voir plus bas). */
+            snprintf(pub_lf, sizeof(pub_lf), "{\"serial\":\"%s\",\"button\":\"0x%X\",\"hop\":\"0x%08X\",\"rssi\":%d,\"t\":%u}",
                      shex, button, (unsigned)hop, rssi, (unsigned)t);
-            mqtt_pub_raw("openprofalux/frames/last", lf, 0, 1);   /* capteur HA "Derniere trame" */
-            char lt[48]; snprintf(lt, sizeof(lt), "openprofalux/frames/log/%d", slot);
-            mqtt_pub_raw(lt, lf, 1, 1);   /* QoS 1 + retained : recuperable via frames/log/# */
+            pub_slot = slot; do_pub = true;
         }
     }
     track_shutter_position(shex, button);   /* toujours (idempotent sur les repetitions) */
     UNLOCK();
+    /* DEADLOCK FIX : ne JAMAIS publier en MQTT sous le LOCK. Un publish QoS1 retained peut
+     * bloquer (outbox pleine pendant une rafale d'apprentissage) ; or l'ESP est abonne a
+     * frames/log/# et recoit ses propres publications -> la tache MQTT reprend ce meme LOCK
+     * pour les traiter. Publier apres UNLOCK casse le cycle d'attente mutuelle. */
+    if (do_pub) {
+        mqtt_pub_raw("openprofalux/frames/last", pub_lf, 0, 1);   /* capteur HA "Derniere trame" */
+        char lt[48]; snprintf(lt, sizeof(lt), "openprofalux/frames/log/%d", pub_slot);
+        mqtt_pub_raw(lt, pub_lf, 1, 1);   /* QoS 1 + retained : recuperable via frames/log/# */
+    }
 }
 
 /* Ajoute au JSON une commande apprise : { "b": <bouton>, "s": "0x<serial>" }.
