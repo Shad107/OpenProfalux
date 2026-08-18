@@ -155,6 +155,9 @@ progress::-webkit-progress-value{background:var(--accent)}
 .slots{display:flex;flex-direction:column;gap:8px;margin:14px 0 6px}
 .slot{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;padding:11px 14px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2)}
 .slot.done{border-color:color-mix(in srgb,var(--ok) 45%,var(--border));background:color-mix(in srgb,var(--ok) 10%,var(--surface-2))}
+.slot.done[draggable]{cursor:grab}
+.slot.dragging{opacity:.5}
+.slot.dragover{outline:2px dashed var(--accent);outline-offset:-2px}
 .slot-ico{font-size:1.1rem;width:20px;text-align:center;color:var(--accent);flex:none}
 .slot.done .slot-ico{color:var(--ok)}
 .slot-lbl{font-weight:600;min-width:76px}

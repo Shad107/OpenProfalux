@@ -148,6 +148,20 @@ function renderLearnSlots() {
     row.innerHTML = `<span class="slot-ico">${A.ico}</span><span class="slot-lbl">${A.lbl}</span>
       <span class="slot-state">${learned ? `✓ appris <code>0x${(c.b).toString(16).toUpperCase()}</code> <code>${esc(c.s)}</code>` : 'à capturer'}</span>
       ${moveSel}<button class="btn slot-btn" data-a="${A.a}">${learned ? 'Recapturer' : 'Capturer'}</button>`;
+    /* drag-and-drop : glisser une commande apprise sur un autre slot -> reassignation */
+    const act = A.a;
+    if (learned) {
+      row.draggable = true;
+      row.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', act); e.dataTransfer.effectAllowed = 'move'; row.classList.add('dragging'); });
+      row.addEventListener('dragend', () => row.classList.remove('dragging'));
+    }
+    row.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; row.classList.add('dragover'); });
+    row.addEventListener('dragleave', () => row.classList.remove('dragover'));
+    row.addEventListener('drop', e => {
+      e.preventDefault(); row.classList.remove('dragover');
+      const from = e.dataTransfer.getData('text/plain');
+      if (from && from !== act && activeVolet && !learning) reassign(from, act);
+    });
     box.appendChild(row);
   }
   const enabled = !!id && !learning;
