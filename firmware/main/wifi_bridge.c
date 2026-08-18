@@ -57,7 +57,12 @@ int wifi_bridge_start_sta(const char *ssid, const char *pass) {
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &cfg));
     ESP_ERROR_CHECK(esp_wifi_start());
-    ESP_LOGI(TAG, "STA started, SSID=%s", ssid);
+    /* ROOT CAUSE instabilite : le power-save par defaut (WIFI_PS_MIN_MODEM) endort le modem
+     * -> l'AP casse l'agregation (block-ack "delba code:39" = timeout) et le lien meurt
+     * SILENCIEUSEMENT (pas de STA_DISCONNECTED) -> pas de reconnexion -> MQTT/HTTP morts jusqu'au
+     * reboot. On desactive le modem-sleep : lien stable. (Deja fait ponctuellement pendant l'OTA.) */
+    esp_wifi_set_ps(WIFI_PS_NONE);
+    ESP_LOGI(TAG, "STA started, SSID=%s (power-save OFF)", ssid);
     return 0;
 }
 
