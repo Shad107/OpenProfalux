@@ -72,6 +72,7 @@ static bool     s_mqtt_ready = false;   /* true apres shutters_mqtt_announce() *
 static bool     s_log_frames = false;   /* publie toutes les trames captees en MQTT */
 static bool     s_frames_dirty = false; /* dataset modifie -> a resauvegarder en NVS */
 static bool     s_ring_dirty = false;    /* ring RF modifie -> a resauvegarder en NVS */
+static bool     s_pos_dirty = false;     /* position d'un volet a changer/figer -> sauver la cfg (retenir la position au reboot) */
 #define FRAMES_NVS_MAX 256              /* hops distincts persistes NVS (~2 Ko) ; NVS=16Ko partagee avec le ring 300 + cfg. Le gros dataset slide s'accumule cote MQTT/HA. */
 
 #define LOCK()   xSemaphoreTake(s_lock, portMAX_DELAY)
@@ -418,7 +419,7 @@ static void start_move(volet_t *v, int dir) {
     emit_press(dir > 0 ? v->up : v->down);
 }
 static void do_stop(volet_t *v) {
-    v->dir = 0; v->target = -1; v->own_move = false;   /* mouvement termine -> le suivi de la vraie telecommande redevient possible */
+    v->dir = 0; v->target = -1; v->own_move = false; s_pos_dirty = true;   /* fin mouvement : suivi telecommande OK + retenir la position */
     emit_press(v->stop);    /* rafale STOP = fige le moteur a la position voulue */
     radio_pause_rx(false);  /* fin de notre commande : on reprend l'ecoute (sync + frame-log) */
 }
@@ -428,7 +429,7 @@ static void track_move(volet_t *v, int dir) {
     v->dir = dir; v->own_move = false; v->target = (dir > 0) ? 0 : 100;   /* monter -> fermeture 0, descendre -> 100 */
     v->last_tick_us = esp_timer_get_time();
 }
-static void freeze(volet_t *v) { v->dir = 0; v->target = -1; v->own_move = false; }
+static void freeze(volet_t *v) { v->dir = 0; v->target = -1; v->own_move = false; s_pos_dirty = true; }
 
 /* ── Home Assistant : discovery + etat (MQTT) ── */
 static void ha_state_str(const volet_t *v, char *out) {
@@ -591,7 +592,7 @@ static void tick_task(void *arg) {
             if (reached) {
                 if (!v->own_move) freeze(v);                                /* mouvement externe : on fige le suivi */
                 else if (v->target > 0 && v->target < 100) do_stop(v);      /* notre commande vers une position INTERMEDIAIRE : STOP pour figer */
-                else { v->dir = 0; v->target = -1; v->own_move = false; radio_pause_rx(false); } /* pleine course : moteur a sa BUTEE, pas de STOP premature ; own_move remis a false (suivi telecommande) */
+                else { v->dir = 0; v->target = -1; v->own_move = false; s_pos_dirty = true; radio_pause_rx(false); } /* pleine course : butee, own_move false, retenir la position */
             }
             /* sinon mouvement en cours : le moteur (le notre, lance par une rafale, ou l'externe)
              * tourne tout seul jusqu'au STOP / butee ; on integre juste la position sans re-emettre */
@@ -600,6 +601,7 @@ static void tick_task(void *arg) {
                 publish_volet_state(v);
         }
         UNLOCK();
+        if (s_pos_dirty) { s_pos_dirty = false; LOCK(); save_cfg(); UNLOCK(); }   /* fige la nouvelle position en NVS (retenue au reboot) */
         /* sauvegarde periodique du dataset en NVS (hors LOCK ; menage la flash : ~60 s si modifie) */
         if (++save_ticks * TICK_MS >= 60000) {
             save_ticks = 0;
