@@ -25,6 +25,7 @@ function applyRoute() {
   if (sub && sec) activateSub(sec, sub);
   if (typeof loadStatus === 'function') loadStatus();   /* refresh immediat a chaque changement d'onglet (ex: RF debug) */
   if (sub === 'rf') { if (typeof loadRf === 'function') loadRf(true); if (typeof loadFrames === 'function') loadFrames(); }
+  if (sub === 'calib' && !calibLive && typeof fillCalib === 'function') fillCalib();   /* affiche les temps enregistres */
 }
 /* Rafraichit la 1re page quand l'onglet RF est actif ET qu'on n'a pas defile (sinon on garde la position). */
 setInterval(() => { if ((location.hash || '').includes('/rf') && typeof loadRf === 'function' && rfOffset <= RF_PAGE) loadRf(true); }, 5000);
