@@ -264,21 +264,33 @@ function renderRemotes(map, rf) {
 const remoteName = s => (statusCache.remotes || {})[s] || s;
 
 /* ── Calibration ── */
-let calT = {}, calStart = 0;
-function chrono(dir) { calStart = performance.now(); $(`#cal-${dir}-start`).disabled = true; $(`#cal-${dir}-stop`).disabled = false; }
+let calT = {}, calStart = 0, calibLive = false;   /* calibLive : true pendant un chrono -> ne pas ecraser l'affichage */
+function chrono(dir) { calibLive = true; calStart = performance.now(); $(`#cal-${dir}-start`).disabled = true; $(`#cal-${dir}-stop`).disabled = false; }
 function chronoStop(dir) {
   calT[dir] = Math.round(performance.now() - calStart);
   $(`#cal-${dir}-t`).textContent = (calT[dir] / 1000).toFixed(1) + 's';
   $(`#cal-${dir}-start`).disabled = false; $(`#cal-${dir}-stop`).disabled = true;
   $('#cal-save').disabled = !(calT.up && calT.down);
 }
+/* Relit les temps ENREGISTRES du volet selectionne (le statut expose travel_up_ms/down_ms). */
+function fillCalib() {
+  const sel = $('#calib-id'); if (!sel) return;
+  const v = (statusCache.volets || []).find(x => x.id === sel.value);
+  if (!v) return;
+  calT = { up: v.travel_up_ms || 0, down: v.travel_down_ms || 0 };
+  const ut = $('#cal-up-t'), dt = $('#cal-down-t');
+  if (ut) ut.textContent = (calT.up / 1000).toFixed(1) + 's';
+  if (dt) dt.textContent = (calT.down / 1000).toFixed(1) + 's';
+  const sv = $('#cal-save'); if (sv) sv.disabled = !(calT.up && calT.down);
+}
 const calId = () => $('#calib-id').value.trim();
+if ($('#calib-id')) $('#calib-id').onchange = () => { calibLive = false; fillCalib(); };   /* change de volet -> relit ses temps enregistres */
 $('#cal-down-start').onclick = () => { chrono('down'); api('/api/shutter', { method:'POST', body: JSON.stringify({ id: calId(), cmd:'down' }) }); };
 $('#cal-down-stop').onclick  = () => { chronoStop('down'); api('/api/shutter', { method:'POST', body: JSON.stringify({ id: calId(), cmd:'stop' }) }); };
 $('#cal-up-start').onclick   = () => { chrono('up'); api('/api/shutter', { method:'POST', body: JSON.stringify({ id: calId(), cmd:'up' }) }); };
 $('#cal-up-stop').onclick    = () => { chronoStop('up'); api('/api/shutter', { method:'POST', body: JSON.stringify({ id: calId(), cmd:'stop' }) }); };
 $('#cal-save').onclick = () => { api('/api/calibrate', { method: 'POST',
-  body: JSON.stringify({ id: calId(), travel_up_ms: calT.up, travel_down_ms: calT.down }) }); toast('Calibration enregistrée'); };
+  body: JSON.stringify({ id: calId(), travel_up_ms: calT.up, travel_down_ms: calT.down }) }); calibLive = false; toast('Calibration enregistrée'); };
 
 /* ── Config : Wi-Fi / MQTT / Système (sauvegardes séparées, partielles) ── */
 async function loadConfig() {
@@ -403,6 +415,7 @@ async function loadStatus() {
   const rf = s.rf || [];
   renderVolets(s.volets || [], rf);
   fillVoletPickers(s.volets || []);
+  if ((location.hash || '').includes('/calib') && !calibLive) fillCalib();   /* affiche les temps enregistres */
   if (!learning) { renderVoletPicker(); renderLearnSlots(); }
   wifiStatusLine(s.wifi); mqttStatusLine(s.mqtt);
   const ci = $('#calib-info'); if (ci) ci.hidden = !!s.listening;   /* bandeau visible seulement si option OFF */
