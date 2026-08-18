@@ -229,6 +229,13 @@ static void spiffs_mount(void) {   /* la NVS (16 Ko) ne tient pas le ring 300 ->
     esp_err_t e = esp_vfs_spiffs_register(&c);
     ESP_LOGI(TAG, "spiffs mount: %s", esp_err_to_name(e));
 }
+/* Le (serial, hop) est-il deja dans le ring ? (dedup : une pression = ~10 repetitions du meme hop).
+ * Le hop encode le bouton -> (serial, hop) identique => meme bouton. Caller detient le LOCK (ou boot). */
+static bool ring_contains(const char *shex, uint32_t hop) {
+    for (int k = 0; k < RF_RING; k++)
+        if (s_rf[k].serial[0] && s_rf[k].hop == hop && !strcmp(s_rf[k].serial, shex)) return true;
+    return false;
+}
 static void save_ring(void) {
     int head;
     LOCK();
@@ -254,17 +261,20 @@ static void load_ring(void) {   /* boot : restaure le ring + reconstruit les bit
     if (fread(&head, sizeof(head), 1, f) != 1) { fclose(f); return; }
     size_t r = fread(s_ringbuf, 1, sizeof(s_ringbuf), f);
     fclose(f);
+    (void)head;
     int n = r / sizeof(ringrec_t); if (n > RF_RING) n = RF_RING;
-    int loaded = 0;
-    for (int i = 0; i < n; i++) {
-        rfrec_t *rr = &s_rf[i];
-        if (!s_ringbuf[i].serial && !s_ringbuf[i].hop) { rr->serial[0] = 0; continue; }
-        snprintf(rr->serial, SH_SERIAL_LEN, "0x%07X", (unsigned)s_ringbuf[i].serial);
+    int loaded = 0;   /* on compacte + on deduplique (nettoie d'eventuels doublons deja en SPIFFS) */
+    for (int i = 0; i < n && loaded < RF_RING; i++) {
+        if (!s_ringbuf[i].serial && !s_ringbuf[i].hop) continue;
+        char shex[SH_SERIAL_LEN]; snprintf(shex, sizeof(shex), "0x%07X", (unsigned)s_ringbuf[i].serial);
+        if (ring_contains(shex, s_ringbuf[i].hop)) continue;   /* dedup (serial, hop) */
+        rfrec_t *rr = &s_rf[loaded];
+        strlcpy(rr->serial, shex, SH_SERIAL_LEN);
         rr->hop = s_ringbuf[i].hop; rr->t = s_ringbuf[i].t; rr->button = s_ringbuf[i].button; rr->rssi = s_ringbuf[i].rssi;
         loaded++;
     }
-    if (head >= 0 && head < RF_RING) s_rfhead = head;
-    ESP_LOGI(TAG, "load_ring: %d trames rechargees (%d o, head=%d)", loaded, (int)r, head);
+    s_rfhead = loaded % RF_RING;   /* prochaine place libre apres compactage */
+    ESP_LOGI(TAG, "load_ring: %d trames rechargees/dedupliquees (%d o)", loaded, (int)r);
 }
 
 /* Repeuplement depuis MQTT (frames/log/<slot>) : remplit le slot UNIQUEMENT s'il est vide (NVS vide)
@@ -273,7 +283,7 @@ static void ring_fill_from_mqtt(int slot, const char *ser, uint8_t button, uint3
     if (slot < 0 || slot >= RF_RING || !ser || !ser[0]) return;
     LOCK();
     rfrec_t *r = &s_rf[slot];
-    if (!r->serial[0]) {   /* vide seulement : la NVS (si presente) reste prioritaire */
+    if (!r->serial[0] && !ring_contains(ser, hop)) {   /* slot vide ET pas deja present ailleurs (dedup) */
         strlcpy(r->serial, ser, SH_SERIAL_LEN);
         r->button = button; r->hop = hop; r->t = t; r->rssi = rssi;
         s_ring_dirty = true;
@@ -747,34 +757,33 @@ void shutters_on_rx(const char *bits, uint32_t serial, uint8_t button, int8_t rs
     ESP_LOGI(TAG, "RX serial=0x%07X bouton=0x%X hop=0x%08X rssi=%d dBm",
              (unsigned)serial, button, (unsigned)hop, rssi);
     LOCK();
-    /* journal RF pour le monitor UI (+ trame complete rejouable pour l'adoption) */
-    int slot = s_rfhead;   /* emplacement de l'anneau -> topic MQTT recuperable frames/log/<slot> */
-    rfrec_t *r = &s_rf[s_rfhead];
-    time_t now = time(NULL);
-    r->t = (now > 1600000000) ? (uint32_t)now : 0;   /* epoch si horloge SNTP synchro, sinon 0 = heure inconnue */
-    r->button = button; r->hop = hop; r->rssi = rssi;
-    snprintf(r->serial, SH_SERIAL_LEN, "0x%07X", (unsigned)serial);
-    (void)bits;   /* plus stocke : les 66 bits sont reconstruits a la demande (rejeu/adoption) */
-    s_rfhead = (s_rfhead + 1) % RF_RING;
-    s_ring_dirty = true;   /* ring modifie -> a resauvegarder en NVS (trames rejouables apres reboot) */
-    /* auto-enregistre le serial vu (nom vide) */
     char shex[SH_SERIAL_LEN]; snprintf(shex, sizeof(shex), "0x%07X", (unsigned)serial);
-    bool known = false;
-    for (int i = 0; i < s_nremotes; i++) if (!strcmp(s_remotes[i].serial, shex)) { known = true; break; }
-    if (!known && s_nremotes < 16) { strlcpy(s_remotes[s_nremotes].serial, shex, SH_SERIAL_LEN); s_remotes[s_nremotes].name[0] = 0; s_nremotes++; }
-
-    if (s_log_frames && s_mqtt_ready) {
-        dataset_log_frame(shex, button, hop, rssi, r->t);  /* fonction 1 : dataset dedup (bouton+t pour le slide) */
-        char lf[128];
-        snprintf(lf, sizeof(lf), "{\"serial\":\"%s\",\"button\":\"0x%X\",\"hop\":\"0x%08X\",\"rssi\":%d,\"t\":%u}",
-                 shex, button, (unsigned)hop, rssi, (unsigned)r->t);
-        mqtt_pub_raw("openprofalux/frames/last", lf, 0, 1);   /* capteur HA "Derniere trame" */
-        /* anneau retained : chaque trame sur SON topic -> un abonne a frames/log/# recupere les 300.
-         * Le slot est reutilise (recyclage auto). Contient tout le necessaire au rejeu + dataset slide. */
-        char lt[48]; snprintf(lt, sizeof(lt), "openprofalux/frames/log/%d", slot);
-        mqtt_pub_raw(lt, lf, 1, 1);   /* QoS 1 : "seulement si reussi" (le broker confirme, sinon retransmission) */
+    (void)bits;   /* plus stocke : les 66 bits sont reconstruits a la demande (rejeu/adoption) */
+    /* DEDUP : meme (serial, hop) deja vu -> repetition d'un meme appui, on n'ajoute rien (ni ring ni MQTT). */
+    if (!ring_contains(shex, hop)) {
+        int slot = s_rfhead;   /* emplacement -> topic MQTT recuperable frames/log/<slot> */
+        rfrec_t *r = &s_rf[s_rfhead];
+        time_t now = time(NULL);
+        uint32_t t = (now > 1600000000) ? (uint32_t)now : 0;   /* epoch si SNTP synchro, sinon 0 */
+        r->t = t; r->button = button; r->hop = hop; r->rssi = rssi;
+        strlcpy(r->serial, shex, SH_SERIAL_LEN);
+        s_rfhead = (s_rfhead + 1) % RF_RING;
+        s_ring_dirty = true;
+        /* auto-enregistre le serial vu (nom vide) */
+        bool known = false;
+        for (int i = 0; i < s_nremotes; i++) if (!strcmp(s_remotes[i].serial, shex)) { known = true; break; }
+        if (!known && s_nremotes < 16) { strlcpy(s_remotes[s_nremotes].serial, shex, SH_SERIAL_LEN); s_remotes[s_nremotes].name[0] = 0; s_nremotes++; }
+        if (s_log_frames && s_mqtt_ready) {
+            dataset_log_frame(shex, button, hop, rssi, t);  /* dataset slide (dedup par hop, bouton+t) */
+            char lf[128];
+            snprintf(lf, sizeof(lf), "{\"serial\":\"%s\",\"button\":\"0x%X\",\"hop\":\"0x%08X\",\"rssi\":%d,\"t\":%u}",
+                     shex, button, (unsigned)hop, rssi, (unsigned)t);
+            mqtt_pub_raw("openprofalux/frames/last", lf, 0, 1);   /* capteur HA "Derniere trame" */
+            char lt[48]; snprintf(lt, sizeof(lt), "openprofalux/frames/log/%d", slot);
+            mqtt_pub_raw(lt, lf, 1, 1);   /* QoS 1 + retained : recuperable via frames/log/# */
+        }
     }
-    track_shutter_position(shex, button);                                          /* fonction 2 (toujours) */
+    track_shutter_position(shex, button);   /* toujours (idempotent sur les repetitions) */
     UNLOCK();
 }
 
