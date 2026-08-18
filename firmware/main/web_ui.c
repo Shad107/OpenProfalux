@@ -202,6 +202,16 @@ static esp_err_t h_calibrate(httpd_req_t *r) {
     httpd_resp_sendstr(r, rc == 0 ? "{\"ok\":1}" : "{\"ok\":0}");
     return ESP_OK;
 }
+static esp_err_t h_orientation(httpd_req_t *r) {
+    char *body = read_body(r); if (!body) return httpd_resp_send_err(r, 400, "body");
+    cJSON *j = cJSON_Parse(body); free(body);
+    if (!j) return httpd_resp_send_err(r, 400, "json");
+    cJSON *ori = cJSON_GetObjectItem(j, "orientation");
+    int rc = shutters_set_orientation(jstr(j, "id"), ori ? (int)cJSON_GetNumberValue(ori) : -1);
+    cJSON_Delete(j);
+    httpd_resp_sendstr(r, rc == 0 ? "{\"ok\":1}" : "{\"ok\":0}");
+    return ESP_OK;
+}
 static esp_err_t h_remote(httpd_req_t *r) {
     char *body = read_body(r); if (!body) return httpd_resp_send_err(r, 400, "body");
     cJSON *j = cJSON_Parse(body); free(body);
@@ -462,6 +472,7 @@ void web_ui_start(void) {
     reg(s, "/api/learn/adopt", HTTP_POST, h_learn_adopt);
     reg(s, "/api/rf/replay", HTTP_POST, h_rf_replay);
     reg(s, "/api/calibrate", HTTP_POST, h_calibrate);
+    reg(s, "/api/volet/orientation", HTTP_POST, h_orientation);
     reg(s, "/api/remote",    HTTP_POST, h_remote);
     reg(s, "/api/config",    HTTP_GET,  h_config_get);
     reg(s, "/api/config",    HTTP_POST, h_config_post);

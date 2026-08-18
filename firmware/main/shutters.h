@@ -28,6 +28,7 @@ int  shutters_reassign(const char *id, const char *from, const char *to);
 
 /* Calibration : temps de course. */
 int  shutters_calibrate(const char *id, uint32_t up_ms, uint32_t down_ms);
+int  shutters_set_orientation(const char *id, int orientation);   /* azimut facade (-1 = non defini) */
 
 /* Nommage d'une telecommande (serial -> nom). */
 int  shutters_remote_name(const char *serial, const char *name);

@@ -160,6 +160,11 @@ function renderLearnSlots() {
       ? `⚠ Commandes de plusieurs télécommandes : ${sers.map(s => `<code>${esc(s)}</code>`).join(' ')}`
       : sers.length ? `Télécommande : <code>${esc(sers[0])}</code>` : '';
   }
+  const orientRow = $('#orient-row');
+  if (orientRow) orientRow.hidden = !v;
+  const orientInp = $('#orient-input');
+  if (orientInp && v && document.activeElement !== orientInp)
+    orientInp.value = (v.orientation != null && v.orientation >= 0) ? v.orientation : '';
   const delRow = $('#del-volet-row');
   if (delRow) delRow.hidden = !v;
   const hint = $('#learn-hint');
@@ -177,7 +182,8 @@ function updateRemoteNameField() {
   const vol = (statusCache.volets || []).find(x => x.id === activeVolet);
   const serial = vol && vol.serials && vol.serials[0];
   inp.dataset.serial = serial || '';
-  if (document.activeElement !== inp) inp.value = serial ? ((statusCache.remotes || {})[serial] || '') : '';
+  /* pre-rempli : nom actuel de la telecommande, sinon le nom du volet (defaut modifiable), sinon vide */
+  if (document.activeElement !== inp) inp.value = serial ? ((statusCache.remotes || {})[serial] || activeVolet || '') : '';
   inp.placeholder = serial ? 'Nom de cette télécommande' : 'ex : Murale chambre parents';
   if (btn) btn.hidden = !serial;
 }
@@ -188,6 +194,14 @@ if (renameBtn) renameBtn.onclick = async () => {
   if (!serial) return;
   await api('/api/remote', { method: 'POST', body: JSON.stringify({ serial, name: inp.value.trim() }) });
   toast('Télécommande renommée'); await loadStatus();
+};
+const orientSave = $('#orient-save');
+if (orientSave) orientSave.onclick = async () => {
+  if (!activeVolet) return;
+  const val = $('#orient-input').value.trim();
+  const ori = val === '' ? -1 : parseInt(val, 10);
+  await api('/api/volet/orientation', { method: 'POST', body: JSON.stringify({ id: activeVolet, orientation: ori }) });
+  toast('Orientation enregistrée'); await loadStatus();
 };
 
 async function reassign(from, to) {
@@ -270,6 +284,7 @@ function chrono(dir) { calibLive = true; calStart = performance.now(); $(`#cal-$
 function chronoStop(dir) {
   calT[dir] = Math.round(performance.now() - calStart);
   $(`#cal-${dir}-t`).textContent = (calT[dir] / 1000).toFixed(1) + 's';
+  const m = $(`#cal-${dir}-manual`); if (m) m.value = (calT[dir] / 1000).toFixed(1);   /* refleter dans le champ manuel */
   $(`#cal-${dir}-start`).disabled = false; $(`#cal-${dir}-stop`).disabled = true;
   $('#cal-save').disabled = !(calT.up && calT.down);
 }
@@ -282,8 +297,24 @@ function fillCalib() {
   const ut = $('#cal-up-t'), dt = $('#cal-down-t');
   if (ut) ut.textContent = (calT.up / 1000).toFixed(1) + 's';
   if (dt) dt.textContent = (calT.down / 1000).toFixed(1) + 's';
+  const um = $('#cal-up-manual'), dm = $('#cal-down-manual');
+  if (um && document.activeElement !== um) um.value = calT.up ? (calT.up / 1000) : '';
+  if (dm && document.activeElement !== dm) dm.value = calT.down ? (calT.down / 1000) : '';
   const sv = $('#cal-save'); if (sv) sv.disabled = !(calT.up && calT.down);
 }
+/* Saisie manuelle des temps (secondes) -> met a jour calT (ms) et active Enregistrer. */
+function calManual(sel, key) {
+  const el = $(sel); if (!el) return;
+  el.oninput = () => {
+    calibLive = true;   /* saisie en cours -> le poll ne doit pas ecraser */
+    const s = parseFloat(el.value);
+    calT[key] = (isNaN(s) || s < 0) ? 0 : Math.round(s * 1000);
+    const t = $(`#cal-${key}-t`); if (t) t.textContent = ((calT[key] || 0) / 1000).toFixed(1) + 's';
+    $('#cal-save').disabled = !(calT.up && calT.down);
+  };
+}
+calManual('#cal-up-manual', 'up');
+calManual('#cal-down-manual', 'down');
 const calId = () => $('#calib-id').value.trim();
 if ($('#calib-id')) $('#calib-id').onchange = () => { calibLive = false; fillCalib(); };   /* change de volet -> relit ses temps enregistres */
 $('#cal-down-start').onclick = () => { chrono('down'); api('/api/shutter', { method:'POST', body: JSON.stringify({ id: calId(), cmd:'down' }) }); };

@@ -57,6 +57,12 @@
             <button id="rename-btn" class="btn" hidden>Renommer</button></div></div>
           <div id="learn-slots" class="slots"></div>
           <p class="hint" id="learn-serial"></p>
+          <div class="field" id="orient-row" hidden>
+            <label>Orientation de la façade (azimut) — pour les automatisations soleil</label>
+            <div class="row" style="flex-wrap:nowrap"><input id="orient-input" type="number" min="0" max="359" placeholder="ex : 180 (sud)" style="flex:1;min-width:0">
+            <button id="orient-save" class="btn">Enregistrer</button></div>
+            <p class="hint">0 = Nord · 90 = Est · 180 = Sud · 270 = Ouest. Laisser vide = non défini.</p>
+          </div>
           <div class="row" id="del-volet-row" hidden><button id="del-volet" class="btn danger">🗑 Supprimer ce volet</button></div>
           <p class="hint" id="learn-hint">Choisis un volet ci-dessus pour activer la capture. Place-toi à moins d'un mètre du boîtier et appuie une fois sur le bon bouton.</p>
         </div>
@@ -74,6 +80,9 @@
           </ol>
           <div class="row"><button id="cal-down-start" class="btn">▼ Démarrer descente</button><button id="cal-down-stop" class="btn" disabled>Arrivé en bas · <b><span id="cal-down-t">0.0s</span></b></button></div>
           <div class="row" style="margin-top:9px"><button id="cal-up-start" class="btn">▲ Démarrer montée</button><button id="cal-up-stop" class="btn" disabled>Arrivé en haut · <b><span id="cal-up-t">0.0s</span></b></button></div>
+          <div class="field" style="margin-top:14px"><label>Ou saisir / ajuster manuellement les temps (secondes)</label>
+            <div class="row"><input id="cal-up-manual" type="number" step="0.1" min="0" placeholder="Montée (s)" style="flex:1;min-width:0">
+            <input id="cal-down-manual" type="number" step="0.1" min="0" placeholder="Descente (s)" style="flex:1;min-width:0"></div></div>
           <div class="row end" style="margin-top:15px"><button id="cal-save" class="btn primary" disabled>Enregistrer la calibration</button></div>
         </div>
       </div>

@@ -35,6 +35,7 @@ typedef struct {
     char up[SH_BITS_LEN], down[SH_BITS_LEN], stop[SH_BITS_LEN];
     uint8_t up_btn, down_btn, stop_btn;   /* code bouton appris (pour la sync RX) */
     uint32_t travel_up_ms, travel_down_ms;
+    int   orientation;       /* azimut de la facade (0..359, -1 = non defini) : automatisations soleil HA */
     float position;          /* 0..100 */
     int   dir;               /* -1 down, 0 stop, +1 up */
     int   target;            /* -1 = aucun, sinon 0..100 */
@@ -89,7 +90,7 @@ static volet_t *get_or_create(const char *id) {
     v = &s_volets[s_nvolets++];
     memset(v, 0, sizeof(*v));
     strlcpy(v->id, id, SH_ID_LEN);
-    v->position = 50; v->target = -1; v->pub_pos = -1; v->pub_dir = -9;
+    v->position = 50; v->target = -1; v->pub_pos = -1; v->pub_dir = -9; v->orientation = -1;
     return v;
 }
 
@@ -146,6 +147,7 @@ static char *cfg_to_json(void) {
         cJSON_AddNumberToObject(o, "stop_btn", v->stop_btn);
         cJSON_AddNumberToObject(o, "travel_up_ms", v->travel_up_ms);
         cJSON_AddNumberToObject(o, "travel_down_ms", v->travel_down_ms);
+        cJSON_AddNumberToObject(o, "orientation", v->orientation);
         cJSON_AddNumberToObject(o, "position", (int)(v->position + 0.5f));
         cJSON_AddItemToArray(vols, o);
     }
@@ -340,6 +342,8 @@ static void parse_cfg_json(cJSON *root) {
         v->stop_btn = (uint8_t)cJSON_GetNumberValue(cJSON_GetObjectItem(o, "stop_btn"));
         v->travel_up_ms   = cJSON_GetNumberValue(cJSON_GetObjectItem(o, "travel_up_ms"));
         v->travel_down_ms = cJSON_GetNumberValue(cJSON_GetObjectItem(o, "travel_down_ms"));
+        cJSON *ori = cJSON_GetObjectItem(o, "orientation");
+        v->orientation    = ori ? (int)cJSON_GetNumberValue(ori) : -1;   /* -1 = non defini */
         v->position       = cJSON_GetNumberValue(cJSON_GetObjectItem(o, "position"));
     }
 }
@@ -682,6 +686,15 @@ int shutters_calibrate(const char *id, uint32_t up_ms, uint32_t down_ms) {
     UNLOCK();
     return 0;
 }
+int shutters_set_orientation(const char *id, int orientation) {
+    LOCK();
+    volet_t *v = find_volet(id);
+    if (!v) { UNLOCK(); return -1; }
+    v->orientation = (orientation < 0) ? -1 : (orientation % 360);   /* azimut facade (-1 = non defini) */
+    save_cfg();
+    UNLOCK();
+    return 0;
+}
 int shutters_remote_name(const char *serial, const char *name) {
     LOCK();
     for (int i = 0; i < s_nremotes; i++) if (!strcmp(s_remotes[i].serial, serial)) {
@@ -825,6 +838,7 @@ int shutters_status_json(char *buf, int cap) {
         cJSON_AddNumberToObject(o, "position", (int)(v->position + 0.5f));
         cJSON_AddNumberToObject(o, "travel_up_ms", v->travel_up_ms);     /* pour reafficher la calibration dans l'UI */
         cJSON_AddNumberToObject(o, "travel_down_ms", v->travel_down_ms);
+        cJSON_AddNumberToObject(o, "orientation", v->orientation);       /* azimut facade (-1 = non defini) */
         cJSON *sr = cJSON_AddArrayToObject(o, "serials");
         for (int j = 0; j < v->n_serials; j++) cJSON_AddItemToArray(sr, cJSON_CreateString(v->serials[j]));
         /* etat des 3 commandes : bouton appris (nibble) si le slot est rempli, absent sinon.
