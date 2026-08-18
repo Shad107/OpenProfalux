@@ -355,6 +355,9 @@ static void load_cfg(void) {
     if (!root) return;
     parse_cfg_json(root);
     cJSON_Delete(root);
+    for (int i = 0; i < s_nvolets; i++)   /* DIAGNOSTIC : verifie que la calibration est bien relue */
+        ESP_LOGI(TAG, "cfg volet '%s' : up=%u ms down=%u ms pos=%d",
+                 s_volets[i].id, (unsigned)s_volets[i].travel_up_ms, (unsigned)s_volets[i].travel_down_ms, (int)(s_volets[i].position + 0.5f));
 }
 
 /* ── RF ── */
