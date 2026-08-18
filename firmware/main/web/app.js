@@ -476,11 +476,12 @@ async function loadRf(reset) {
   rfOffset += d.frames.length;
   updateRfFooter();
 }
-/* Scroll infini : charge la page suivante quand la sentinelle (bas du tableau) devient visible. */
+/* Scroll infini : charge la page suivante quand on approche du bas du conteneur (hauteur limitee). */
 {
-  const sen = $('#rf-sentinel');
-  if (sen && 'IntersectionObserver' in window)
-    new IntersectionObserver(es => { if (es[0].isIntersecting && !rfLoading && rfOffset < rfTotal) loadRf(false); }).observe(sen);
+  const wrap = $('.rf-scroll');
+  if (wrap) wrap.addEventListener('scroll', () => {
+    if (!rfLoading && rfOffset < rfTotal && wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 48) loadRf(false);
+  });
 }
 /* Rejouer une trame captee : renvoie la trame brute (serial+hop) au boitier. Delegation (le tbody est re-rendu). */
 const rfBody = $('#rf');

@@ -124,6 +124,8 @@ ol.steps b{color:var(--text);font-weight:600}
 .seg button.on{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
 
 .tbl-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius-sm)}
+.rf-scroll{max-height:26rem;overflow-y:auto}   /* limite la hauteur (~12 lignes) : scroll vertical interne, pas de croissance infinie */
+.rf-scroll thead th{position:sticky;top:0;background:var(--surface);z-index:1}
 table{width:100%;border-collapse:collapse;font-size:.82rem}
 th,td{text-align:left;padding:8px 11px;white-space:nowrap}
 th{font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--surface-2);font-weight:600}
