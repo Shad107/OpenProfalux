@@ -414,7 +414,7 @@ static void start_move(volet_t *v, int dir) {
     emit_press(dir > 0 ? v->up : v->down);
 }
 static void do_stop(volet_t *v) {
-    v->dir = 0; v->target = -1;
+    v->dir = 0; v->target = -1; v->own_move = false;   /* mouvement termine -> le suivi de la vraie telecommande redevient possible */
     emit_press(v->stop);    /* rafale STOP = fige le moteur a la position voulue */
     radio_pause_rx(false);  /* fin de notre commande : on reprend l'ecoute (sync + frame-log) */
 }
@@ -424,7 +424,7 @@ static void track_move(volet_t *v, int dir) {
     v->dir = dir; v->own_move = false; v->target = (dir > 0) ? 0 : 100;   /* monter -> fermeture 0, descendre -> 100 */
     v->last_tick_us = esp_timer_get_time();
 }
-static void freeze(volet_t *v) { v->dir = 0; v->target = -1; }
+static void freeze(volet_t *v) { v->dir = 0; v->target = -1; v->own_move = false; }
 
 /* ── Home Assistant : discovery + etat (MQTT) ── */
 static void ha_state_str(const volet_t *v, char *out) {
@@ -587,7 +587,7 @@ static void tick_task(void *arg) {
             if (reached) {
                 if (!v->own_move) freeze(v);                                /* mouvement externe : on fige le suivi */
                 else if (v->target > 0 && v->target < 100) do_stop(v);      /* notre commande vers une position INTERMEDIAIRE : STOP pour figer */
-                else { v->dir = 0; v->target = -1; radio_pause_rx(false); } /* pleine course : le moteur s'arrete a sa BUTEE, pas de STOP premature (sinon calibration faussee + position bloquee) */
+                else { v->dir = 0; v->target = -1; v->own_move = false; radio_pause_rx(false); } /* pleine course : moteur a sa BUTEE, pas de STOP premature ; own_move remis a false (suivi telecommande) */
             }
             /* sinon mouvement en cours : le moteur (le notre, lance par une rafale, ou l'externe)
              * tourne tout seul jusqu'au STOP / butee ; on integre juste la position sans re-emettre */
