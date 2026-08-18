@@ -428,9 +428,12 @@ function rfRow(f) {
     ? new Date(f.t * 1000).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
     : '—';
   const name = frameName(f.serial);
-  const nameCell = name !== f.serial
-    ? `<a href="#remotes" title="${esc(f.serial)} — voir/paramétrer">${esc(name)}</a>`   /* nom connu -> lien vers Telecommandes */
-    : `<span class="m" title="télécommande non nommée">${esc(f.serial)}</span>`;
+  const vid = voletForSerial(f.serial);   /* volet rattache -> lien qui le selectionne dans l'apprentissage */
+  const nameCell = vid
+    ? `<a href="#remotes/learn" class="frame-link" data-volet="${esc(vid)}" title="${esc(f.serial)} — paramétrer ${esc(vid)}">${esc(name)}</a>`
+    : (name !== f.serial
+        ? `<a href="#remotes/learn" title="${esc(f.serial)} — Télécommandes">${esc(name)}</a>`
+        : `<span class="m" title="télécommande non nommée">${esc(f.serial)}</span>`);
   const bl = buttonLabel(f.serial, f.button);
   const btnCell = bl ? `<span class="badge">${esc(bl)}</span>` : `<span class="badge m">0x${esc(f.button)}</span>`;
   return `<tr><td class="m">${ts}</td><td>${nameCell}</td>
@@ -468,6 +471,9 @@ async function loadRf(reset) {
 /* Rejouer une trame captee : renvoie la trame brute (serial+hop) au boitier. Delegation (le tbody est re-rendu). */
 const rfBody = $('#rf');
 if (rfBody) rfBody.addEventListener('click', async (e) => {
+  /* clic sur un nom rattache a un volet -> selectionne ce volet dans l'apprentissage (le href navigue). */
+  const a = e.target.closest('a.frame-link');
+  if (a) { activeVolet = a.dataset.volet; setTimeout(() => { renderVoletPicker(); renderLearnSlots(); }, 0); return; }
   const b = e.target.closest('button.replay'); if (!b) return;
   b.disabled = true;
   const r = await api('/api/rf/replay', { method: 'POST', body: JSON.stringify({ serial: b.dataset.s, hop: b.dataset.h }) }).catch(() => null);
