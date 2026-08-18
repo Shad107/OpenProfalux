@@ -820,6 +820,8 @@ int shutters_status_json(char *buf, int cap) {
         cJSON *o = cJSON_CreateObject();
         cJSON_AddStringToObject(o, "id", v->id);
         cJSON_AddNumberToObject(o, "position", (int)(v->position + 0.5f));
+        cJSON_AddNumberToObject(o, "travel_up_ms", v->travel_up_ms);     /* pour reafficher la calibration dans l'UI */
+        cJSON_AddNumberToObject(o, "travel_down_ms", v->travel_down_ms);
         cJSON *sr = cJSON_AddArrayToObject(o, "serials");
         for (int j = 0; j < v->n_serials; j++) cJSON_AddItemToArray(sr, cJSON_CreateString(v->serials[j]));
         /* etat des 3 commandes : bouton appris (nibble) si le slot est rempli, absent sinon.
