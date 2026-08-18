@@ -4,6 +4,21 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const api = (u, o) => fetch(u, o).then(r => r.ok ? r.json().catch(() => ({})) : Promise.reject(r.status));
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+/* ── Radio = ressource unique (mutex), TX synchrone ~1s. Pendant qu'une commande
+ *    part, on desactive TOUS les boutons volet + on montre "envoi" pour eviter le
+ *    matraquage : sinon on empile les emissions et on croit que ca ne marche pas.
+ *    La classe est sur <body> -> elle survit aux re-render du polling /api/status. ── */
+let radioBusy = false;
+const setRadioBusy = on => { radioBusy = on; document.body.classList.toggle('radio-busy', on); };
+async function sendCmd(body, activeBtn) {
+  if (radioBusy) return;                       // radio occupee : on ignore le clic en trop
+  setRadioBusy(true);
+  if (activeBtn) activeBtn.classList.add('sending');
+  try { await api('/api/shutter', { method: 'POST', body: JSON.stringify(body) }); }
+  catch (e) { toast('Radio occupée, réessaie dans un instant'); }
+  finally { if (activeBtn) activeBtn.classList.remove('sending'); setRadioBusy(false); }
+}
+
 /* ── Onglets + routes (hash de l'URL, ex #sys/wifi) + thème ── */
 function activateMain(name) {
   const t = $(`.tab[data-t="${name}"]`); if (!t) return false;
@@ -87,15 +102,11 @@ function renderVolets(list, rf) {
       <div class="serials">serials : ${(v.serials || []).map(s => `<code>${esc(remoteName(s))}</code>`).join(' ') || 'aucun'}
         ${r != null ? `<span style="margin-left:6px">· reçu ${sig(r)}</span>` : ''}</div>`;
     el.querySelectorAll('[data-cmd]').forEach(b =>
-      b.onclick = async () => {
-        const r = await api('/api/shutter', { method: 'POST', body: JSON.stringify({ id: v.id, cmd: b.dataset.cmd }) }).catch(() => null);
-        const m = r && r.tx_marc;
-        if (m != null && m >= 0 && m !== 0x13) toast(`${b.dataset.cmd} : TX MARCSTATE=0x${m.toString(16).toUpperCase()} (attendu 0x13, émission KO ?)`);
-      });
+      b.onclick = () => sendCmd({ id: v.id, cmd: b.dataset.cmd }, b));
     const slat = el.querySelector('.slat');
     if (slat) slat.onclick = e => {
       const p = Math.round(100 * (e.offsetX / e.currentTarget.offsetWidth));
-      api('/api/shutter', { method: 'POST', body: JSON.stringify({ id: v.id, cmd: 'pos', value: p }) });
+      sendCmd({ id: v.id, cmd: 'pos', value: p });
     };
     box.appendChild(el);
   }

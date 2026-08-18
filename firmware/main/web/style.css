@@ -112,6 +112,11 @@ select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--
 .dpad button:active{background:var(--accent-weak)}
 .slat{position:relative;height:12px;border-radius:999px;background:var(--surface-2);border:1px solid var(--border);overflow:hidden;cursor:pointer}
 .slat::before{content:"";position:absolute;inset:0;width:calc(var(--p,50)*1%);background:repeating-linear-gradient(90deg,var(--accent),var(--accent) 4px,color-mix(in srgb,var(--accent) 78%,#000) 4px,color-mix(in srgb,var(--accent) 78%,#000) 6px);opacity:.85}
+/* Radio = ressource unique : pendant qu'une commande part (~1s), on montre le bouton actif ("envoi")
+   et on desactive tous les autres boutons volet -> plus de matraquage ni de file d'attente invisible. */
+.dpad button.sending{background:var(--accent);color:var(--surface);border-color:var(--accent);animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+body.radio-busy .dpad button:not(.sending),body.radio-busy .slat{opacity:.45;pointer-events:none;cursor:not-allowed;filter:grayscale(.35)}
 .serials{margin-top:11px;font-size:.76rem;color:var(--muted)}
 .serials code{background:var(--surface-2);padding:1px 6px;border-radius:5px;border:1px solid var(--border)}
 
