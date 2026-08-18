@@ -578,7 +578,11 @@ static void tick_task(void *arg) {
             /* cible atteinte ou butee -> stop */
             int reached = (v->dir > 0 && (v->position >= 100 || (v->target >= 0 && v->position >= v->target)))
                        || (v->dir < 0 && (v->position <= 0   || (v->target >= 0 && v->position <= v->target)));
-            if (reached) { if (v->own_move) do_stop(v); else freeze(v); }
+            if (reached) {
+                if (!v->own_move) freeze(v);                                /* mouvement externe : on fige le suivi */
+                else if (v->target > 0 && v->target < 100) do_stop(v);      /* notre commande vers une position INTERMEDIAIRE : STOP pour figer */
+                else { v->dir = 0; v->target = -1; radio_pause_rx(false); } /* pleine course : le moteur s'arrete a sa BUTEE, pas de STOP premature (sinon calibration faussee + position bloquee) */
+            }
             /* sinon mouvement en cours : le moteur (le notre, lance par une rafale, ou l'externe)
              * tourne tout seul jusqu'au STOP / butee ; on integre juste la position sans re-emettre */
             /* publie l'etat HA quand la position (entiere) ou la direction change */
