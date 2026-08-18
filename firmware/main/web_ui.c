@@ -456,6 +456,12 @@ void web_ui_start(void) {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.max_uri_handlers = 28;   /* > nb d'endpoints reels (sinon "no slots left" -> /api/... non enregistres) */
     cfg.stack_size = 6144;   /* esp_ota_end() consomme la pile en fin d'upload */
+    /* ROOT CAUSE "web UI morte au bout d'un moment" : sans lru_purge, une fois les
+     * max_open_sockets pris (SPA qui poll en keep-alive), le httpd REFUSE toute nouvelle
+     * connexion au lieu de recycler -> port 80 en connection-refused (MQTT non touche).
+     * On recycle la socket la moins recente + un peu plus de sockets. */
+    cfg.lru_purge_enable = true;
+    cfg.max_open_sockets = 7;   /* max = CONFIG_LWIP_MAX_SOCKETS(10) - 3 */
     cfg.uri_match_fn = httpd_uri_match_wildcard;
     httpd_handle_t s = NULL;
     if (httpd_start(&s, &cfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start KO"); return; }
