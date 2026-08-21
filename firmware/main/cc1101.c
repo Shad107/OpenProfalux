@@ -1,8 +1,8 @@
 /*
- * CC1101 driver — Profalux 868.35 MHz OOK
+ * CC1101 driver — Profalux 868.425 MHz OOK
  *
  * NOTE: This is a functional skeleton. Config registers below are
- * validated against SmartRF Studio output for OOK 868.35 MHz ~1550 baud
+ * validated against SmartRF Studio output for OOK 868.425 MHz ~1550 baud
  * asynchronous serial mode with GDO0 output on TX and GDO0 input on RX.
  */
 #include "cc1101.h"
@@ -27,6 +27,12 @@ static const char *TAG = "cc1101";
 static volatile bool s_rx_debug = false;
 void cc1101_set_rx_debug(bool on) { s_rx_debug = on; ESP_LOGW(TAG, "DEBUG capture RX %s", on ? "ON" : "OFF"); }
 bool cc1101_get_rx_debug(void)    { return s_rx_debug; }
+/* Gain RX reglable (AGCCTRL2) : plafond de gain LNA. 0x27=defaut (-9 dB). Plus GRAND
+ * = moins de gain (0x37, 0x3F=-17 dB) -> l'AGC ne remonte plus sur le bruit dans les
+ * creux OOK (moins de fausses transitions), au prix de la sensibilite aux signaux faibles. */
+static volatile uint8_t s_rx_gain = 0x27;
+void cc1101_set_rx_gain(uint8_t v) { s_rx_gain = v; ESP_LOGW(TAG, "RX gain AGCCTRL2=0x%02X", v); }
+uint8_t cc1101_get_rx_gain(void)   { return s_rx_gain; }
 int g_tx_marc = -1;   /* MARCSTATE lu juste apres le dernier STX (0x13=TX). Diagnostic expose via HTTP. */
 static spi_device_handle_t s_spi = NULL;
 static rmt_channel_handle_t s_cap = NULL;
@@ -79,7 +85,7 @@ static volatile bool      s_rx_running = false;
 #define CC_SFTX     0x3B
 #define CC_SFRX     0x3A
 
-/* Config array: OOK 868.35 MHz ~1550 baud asynchronous mode */
+/* Config array: OOK 868.425 MHz ~1550 baud asynchronous mode */
 static const struct { uint8_t reg, val; } s_regs[] = {
     {CC_IOCFG2,   0x0D},  /* Serial data output */
     {CC_IOCFG0,   0x0D},  /* Serial data output on GDO0 */
@@ -395,9 +401,9 @@ int cc1101_rx_listen_bits(uint32_t timeout_ms, char *out_bits, int max_bits) {
     cc1101_write_reg(0x02, 0x0D);   /* IOCFG0 = donnee serie demodulee sur GDO0 */
     cc1101_write_reg(0x0B, 0x06);   /* FSCTRL1 */
     cc1101_write_reg(0x19, 0x14);   /* FOCCFG  */
-    cc1101_write_reg(0x1B, 0x27);   /* AGCCTRL2 : plafonne le gain LNA (-9 dB) pour mordre le bruit OOK sans
-                                       rendre sourd. 0x07=gain max (bruit permanent, buffer RMT sature) ;
-                                       0x3F=-17dB (trop, telecommande inaudible). 0x27 = compromis a valider. */
+    cc1101_write_reg(0x1B, s_rx_gain);   /* AGCCTRL2 : plafond de gain LNA, REGLABLE via l'UI (defaut 0x27=-9 dB).
+                                       0x07=gain max (bruit permanent, buffer RMT sature) ; 0x3F=-17 dB (mordant,
+                                       utile si demod bruitee sur signal fort). Voir cc1101_set_rx_gain(). */
     cc1101_write_reg(0x1C, 0x00);   /* AGCCTRL1 */
     cc1101_write_reg(0x1D, 0x91);   /* AGCCTRL0 */
     strobe(CC_SIDLE); esp_rom_delay_us(200);
@@ -444,7 +450,7 @@ int cc1101_rx_listen_bits(uint32_t timeout_ms, char *out_bits, int max_bits) {
                  * Erratique (<200us, valeurs folles) = bruit RF qui dechire la trame. */
                 if (drssi > -70) {
                     /* FREQEST : offset de freq estime. |grand| = quartz du module decale
-                     * (RX desaccordee du 868.35 -> demod OOK distordue). ~26MHz/2^14 ≈ 1587 Hz/pas. */
+                     * (RX desaccordee du 868.425 -> demod OOK distordue). ~26MHz/2^14 ≈ 1587 Hz/pas. */
                     int8_t fq = (int8_t)cc1101_read_reg(CC_FREQEST | 0x40);
                     int fq_khz = (int)fq * 1587 / 1000;
                     char dbuf[320]; int p = 0;

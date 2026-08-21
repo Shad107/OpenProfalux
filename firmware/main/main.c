@@ -30,6 +30,7 @@
 static const char *TAG = "main";
 static bool s_log_frames = false;   /* option UI "capture toutes les trames" (namespace cfg) */
 static bool s_debug      = false;   /* switch UI "debug console" : logge chaque capture RX */
+static uint8_t s_rx_gain = 0x27;    /* plafond de gain RX (AGCCTRL2) reglable via l'UI ; defaut 0x27 */
 
 /* Device name / config from NVS */
 static char s_device_name[32] = "volet_test";
@@ -52,6 +53,7 @@ static void load_config(void) {
     sz = sizeof(s_mqtt_pass);   nvs_get_str(h, "mqtt_pass", s_mqtt_pass, &sz);
     uint8_t lf = 0; nvs_get_u8(h, "log_frames", &lf); s_log_frames = lf;
     uint8_t db = 0; nvs_get_u8(h, "debug", &db); s_debug = db;
+    uint8_t rg = 0; if (nvs_get_u8(h, "rx_gain", &rg) == ESP_OK && rg) s_rx_gain = rg;
     nvs_close(h);
     /* Nom d'appareil vide -> defaut : sinon client_id MQTT vide + topic de disponibilite
      * qui ne coincide pas avec la decouverte HA. */
@@ -116,6 +118,7 @@ void app_main(void) {
     shutters_init();
     if (s_log_frames) shutters_set_log_frames(true);
     cc1101_set_rx_debug(s_debug);   /* switch DEBUG console restaure au boot */
+    cc1101_set_rx_gain(s_rx_gain);  /* plafond de gain RX restaure au boot */
 
     /* 5. Wi-Fi */
     wifi_bridge_init();

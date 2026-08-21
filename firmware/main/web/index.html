@@ -150,6 +150,14 @@
             <span class="lbl">Écoute RF permanente<small>Active le RF debug en direct, le suivi de position via la vraie télécommande et le dataset MQTT. Désactivée = radio libre (moins de bruit).</small></span></label>
           <label class="switch"><input type="checkbox" id="sys-debug"><span class="track"></span>
             <span class="lbl">Debug console<small>Logge chaque capture RX dans la console série (symboles, RSSI, bits, KeeLoq ou non). Pour diagnostiquer « ça ne capte pas ». À laisser OFF en usage normal (verbeux).</small></span></label>
+          <div class="field" style="margin-top:12px"><label>Gain RX (AGCCTRL2) — réglage de diagnostic réception</label>
+            <select id="sys-rxgain">
+              <option value="7">0x07 — gain max (le plus sensible, mais capte le bruit)</option>
+              <option value="39">0x27 — défaut (-9 dB)</option>
+              <option value="47">0x2F — gain réduit</option>
+              <option value="55">0x37 — gain réduit +</option>
+              <option value="63">0x3F — mordant (-17 dB) : si démod bruitée sur signal fort</option>
+            </select></div>
           <label class="switch"><input type="checkbox" id="sys-reboot"><span class="track"></span>
             <span class="lbl">Redémarrer après enregistrement</span></label>
           <div class="row end"><button id="sys-save" class="btn primary">Enregistrer</button></div>
