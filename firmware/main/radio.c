@@ -55,6 +55,18 @@ int radio_listen_once(uint32_t timeout_ms, char *buf, int max) {
 
 void radio_pause_rx(bool pause) { s_paused = pause; }
 
+/* Relance le self-test TX a la demande (bouton UI), sous mutex/pause pour ne pas
+ * entrer en collision avec l'ecoute. Retourne 0 si la puce passe en TX, -1 sinon. */
+int radio_tx_selftest(void) {
+    if (!s_mtx) return -1;
+    bool was = s_paused; s_paused = true;
+    xSemaphoreTake(s_mtx, portMAX_DELAY);
+    int r = cc1101_tx_selftest();
+    xSemaphoreGive(s_mtx);
+    s_paused = was;
+    return r;
+}
+
 /* ── Auto-calibration du gain RX ──────────────────────────────────────────
  * Balaie une echelle de gain (du + sensible au + mordant) ; a chaque cran, ecoute
  * quelques secondes ; DES QU'UNE TRAME VALIDE (>=64 bits) est captee, verrouille ce

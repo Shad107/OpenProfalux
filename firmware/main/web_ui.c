@@ -477,6 +477,24 @@ static esp_err_t h_rx_calibrate_status(httpd_req_t *r) {
     return httpd_resp_sendstr(r, out);
 }
 
+/* ── /api/diag : diagnostic radio (puce + self-test TX) pour l'UI ── */
+static esp_err_t h_diag(httpd_req_t *r) {
+    int tx_ok = -1; uint8_t partnum = 0xFF, version = 0xFF;
+    cc1101_get_diag(&tx_ok, &partnum, &version);
+    char out[128];
+    snprintf(out, sizeof(out), "{\"tx_ok\":%d,\"partnum\":%d,\"version\":%d}", tx_ok, partnum, version);
+    httpd_resp_set_type(r, "application/json");
+    return httpd_resp_sendstr(r, out);
+}
+static esp_err_t h_diag_tx(httpd_req_t *r) {   /* re-lance le self-test TX a la demande */
+    int rc = radio_tx_selftest();
+    int tx_ok = -1; cc1101_get_diag(&tx_ok, NULL, NULL);
+    char out[48];
+    snprintf(out, sizeof(out), "{\"ok\":%d,\"tx_ok\":%d}", rc == 0 ? 1 : 0, tx_ok);
+    httpd_resp_set_type(r, "application/json");
+    return httpd_resp_sendstr(r, out);
+}
+
 static void reg(httpd_handle_t s, const char *uri, httpd_method_t m, esp_err_t (*h)(httpd_req_t *)) {
     httpd_uri_t u = { .uri = uri, .method = m, .handler = h };
     httpd_register_uri_handler(s, &u);
@@ -520,6 +538,8 @@ void web_ui_start(void) {
     reg(s, "/api/rf",           HTTP_GET,  h_rf);
     reg(s, "/api/rx/calibrate", HTTP_POST, h_rx_calibrate);
     reg(s, "/api/rx/calibrate", HTTP_GET,  h_rx_calibrate_status);
+    reg(s, "/api/diag",         HTTP_GET,  h_diag);
+    reg(s, "/api/diag/tx",      HTTP_POST, h_diag_tx);
     reg(s, "/api/backup",       HTTP_GET,  h_backup);
     reg(s, "/api/restore",      HTTP_POST, h_restore);
     reg(s, "/api/mqtt/discover", HTTP_GET, h_mqtt_discover);

@@ -33,6 +33,15 @@ bool cc1101_get_rx_debug(void)    { return s_rx_debug; }
 static volatile uint8_t s_rx_gain = 0x27;
 void cc1101_set_rx_gain(uint8_t v) { s_rx_gain = v; ESP_LOGW(TAG, "RX gain AGCCTRL2=0x%02X", v); }
 uint8_t cc1101_get_rx_gain(void)   { return s_rx_gain; }
+/* Diagnostic radio expose a l'UI : detection de la puce + resultat du self-test TX. */
+static int     s_tx_ok   = -1;      /* -1=non teste, 0=HS, 1=OK (puce passe en TX) */
+static uint8_t s_partnum = 0xFF;    /* CC1101 attendu : PARTNUM 0x00, VERSION 0x04/0x14 */
+static uint8_t s_version = 0xFF;
+void cc1101_get_diag(int *tx_ok, uint8_t *partnum, uint8_t *version) {
+    if (tx_ok)   *tx_ok   = s_tx_ok;
+    if (partnum) *partnum = s_partnum;
+    if (version) *version = s_version;
+}
 int g_tx_marc = -1;   /* MARCSTATE lu juste apres le dernier STX (0x13=TX). Diagnostic expose via HTTP. */
 static spi_device_handle_t s_spi = NULL;
 static rmt_channel_handle_t s_cap = NULL;
@@ -177,8 +186,10 @@ int cc1101_init(void) {
         cs_low(); spi_xfer(tx, rx, 3); cs_high();
     }
     uint8_t partnum = cc1101_read_reg(CC_PARTNUM | 0x40);
+    uint8_t version = cc1101_read_reg(0x31 | 0x40);   /* VERSION : ~0x04/0x14 sur un vrai CC1101 */
     uint8_t marc    = cc1101_read_reg(CC_MARCSTATE | 0x40) & 0x1F;
-    ESP_LOGI(TAG, "PARTNUM=0x%02X (=expected 0x00) MARCSTATE=0x%02X (0x01=IDLE)", partnum, marc);
+    s_partnum = partnum; s_version = version;          /* pour le diagnostic UI */
+    ESP_LOGI(TAG, "PARTNUM=0x%02X VERSION=0x%02X (attendu 0x00/0x04-0x14) MARCSTATE=0x%02X", partnum, version, marc);
     return (partnum == 0x00) ? 0 : -1;
 }
 
@@ -216,7 +227,8 @@ int cc1101_tx_selftest(void) {
     strobe(CC_SIDLE);
     ESP_LOGI(TAG, "TX SELFTEST: MARCSTATE post-STX=0x%02X, pendant modulation=0x%02X "
                   "(0x13=TX porteuse ON, 0x01=IDLE=rien)", m1, m2);
-    return (m1 == 0x13 || m2 == 0x13) ? 0 : -1;
+    s_tx_ok = (m1 == 0x13 || m2 == 0x13) ? 1 : 0;   /* pour le diagnostic UI */
+    return s_tx_ok ? 0 : -1;
 }
 
 int cc1101_tx_ook_frame(const uint8_t *frame, size_t bits) {

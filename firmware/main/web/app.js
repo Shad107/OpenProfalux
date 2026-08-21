@@ -401,6 +401,24 @@ if ($('#rxcal-btn')) $('#rxcal-btn').onclick = async () => {
     }
   }, 1000);
 };
+async function loadDiag() {
+  const el = $('#diag-line'); if (!el) return;
+  const d = await api('/api/diag').catch(() => null);
+  if (!d) { el.textContent = 'indisponible'; return; }
+  const ph = '0x' + Number(d.partnum).toString(16).toUpperCase().padStart(2, '0');
+  const vh = '0x' + Number(d.version).toString(16).toUpperCase().padStart(2, '0');
+  const chipOk = (d.partnum === 0 && d.version !== 0 && d.version !== 255);
+  const chip = chipOk ? `détectée (PARTNUM ${ph} · VERSION ${vh})` : `NON détectée (${ph}/${vh}) — vérifie SPI/câblage`;
+  const tx = d.tx_ok === 1 ? 'OK ✓' : (d.tx_ok === 0 ? 'HS ✗ — la puce ne passe pas en émission' : 'non testé');
+  el.innerHTML = `Puce CC1101 : ${chip}<br>Émission (TX) : <b>${tx}</b><br>Réception (RX) : les trames reçues apparaissent dans l'onglet RF (si oui = RX OK)`;
+}
+if ($('#diag-tx-btn')) $('#diag-tx-btn').onclick = async () => {
+  const btn = $('#diag-tx-btn'); btn.disabled = true;
+  const el = $('#diag-line'); if (el) el.textContent = 'Test d\'émission en cours…';
+  await api('/api/diag/tx', { method: 'POST' }).catch(() => {});
+  await loadDiag(); btn.disabled = false;
+};
+loadDiag();
 $('#mqtt-detect').onclick = async () => {
   const b = $('#mqtt-detect'); b.textContent = 'Recherche…'; b.disabled = true;
   const r = await api('/api/mqtt/discover').catch(() => ({}));

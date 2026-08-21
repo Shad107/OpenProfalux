@@ -160,10 +160,15 @@
             </select>
             <p class="hint" style="margin-top:8px"><button id="rxcal-btn" class="btn" type="button">Calibrer la réception (auto)</button>
               <span id="rxcal-status" style="margin-left:8px"></span></p>
-            <p class="hint">Clique, puis appuie sur ta télécommande à moins d'1 m : le boîtier teste les gains et verrouille le bon tout seul, sans lire de log.</p></div>
+            <p class="hint">Clique, puis <b>appuie en continu / répète les appuis</b> sur ta télécommande à moins d'1 m pendant tout le test (~25 s) : le boîtier teste chaque gain 6 s et verrouille le bon dès qu'il capte une trame valide. Presse à chaque changement de valeur affiché.</p></div>
           <label class="switch"><input type="checkbox" id="sys-reboot"><span class="track"></span>
             <span class="lbl">Redémarrer après enregistrement</span></label>
           <div class="row end"><button id="sys-save" class="btn primary">Enregistrer</button></div>
+        </div>
+        <div class="card">
+          <h2>Diagnostic radio</h2>
+          <p class="hint" id="diag-line">Chargement…</p>
+          <div class="row end"><button id="diag-tx-btn" class="btn" type="button">Re-tester l'émission (TX)</button></div>
         </div>
       </div>
 

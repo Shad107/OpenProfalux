@@ -44,6 +44,7 @@ void cc1101_set_rx_debug(bool on);   /* switch DEBUG : logge chaque capture RX (
 bool cc1101_get_rx_debug(void);
 void cc1101_set_rx_gain(uint8_t agcctrl2);   /* plafond de gain RX (AGCCTRL2) reglable ; defaut 0x27 */
 uint8_t cc1101_get_rx_gain(void);
+void cc1101_get_diag(int *tx_ok, uint8_t *partnum, uint8_t *version); /* diag UI : puce + self-test TX */
 uint8_t cc1101_read_reg(uint8_t addr);
 void   cc1101_write_reg(uint8_t addr, uint8_t val);
 
