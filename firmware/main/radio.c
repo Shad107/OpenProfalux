@@ -8,6 +8,7 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 static const char *TAG = "radio";
 
@@ -53,6 +54,53 @@ int radio_listen_once(uint32_t timeout_ms, char *buf, int max) {
 }
 
 void radio_pause_rx(bool pause) { s_paused = pause; }
+
+/* ── Auto-calibration du gain RX ──────────────────────────────────────────
+ * Balaie une echelle de gain (du + sensible au + mordant) ; a chaque cran, ecoute
+ * quelques secondes ; DES QU'UNE TRAME VALIDE (>=64 bits) est captee, verrouille ce
+ * gain (= le + sensible qui donne une trame propre chez CE module). L'utilisateur
+ * appuie sur sa telecommande pendant l'operation, sans lire aucun log. */
+static volatile int     s_cal_state   = 0;   /* 0=idle 1=en cours 2=ok 3=echec */
+static volatile uint8_t s_cal_testing = 0;   /* gain (AGCCTRL2) en cours de test */
+static volatile uint8_t s_cal_result  = 0;   /* gain retenu si ok */
+
+static void cal_task(void *arg) {
+    (void)arg;
+    static const uint8_t ladder[] = { 0x27, 0x2F, 0x37, 0x3F };
+    char bits[80];
+    bool was = s_paused; s_paused = true;              /* suspend l'ecoute permanente */
+    int found = -1;
+    for (int i = 0; i < (int)sizeof(ladder) && found < 0 && s_run; i++) {
+        cc1101_set_rx_gain(ladder[i]);
+        s_cal_testing = ladder[i];
+        int64_t t_end = esp_timer_get_time() + 6 * 1000000;   /* 6 s par cran */
+        while (esp_timer_get_time() < t_end && s_run) {
+            xSemaphoreTake(s_mtx, portMAX_DELAY);
+            int n = cc1101_rx_listen_bits(400, bits, 79);
+            xSemaphoreGive(s_mtx);
+            if (n >= 64) { found = ladder[i]; break; }         /* trame propre = ce gain va */
+        }
+    }
+    if (found > 0) { cc1101_set_rx_gain((uint8_t)found); s_cal_result = (uint8_t)found; s_cal_state = 2; }
+    else           { cc1101_set_rx_gain(0x27);            s_cal_result = 0;             s_cal_state = 3; }
+    s_paused = was;
+    ESP_LOGW(TAG, "calibration gain RX : %s (0x%02X)", found > 0 ? "OK" : "ECHEC", found > 0 ? found : 0x27);
+    vTaskDelete(NULL);
+}
+
+int radio_calibrate_start(void) {
+    if (!s_mtx) return -1;
+    if (s_cal_state == 1) return 1;                    /* deja en cours */
+    s_cal_state = 1; s_cal_testing = 0; s_cal_result = 0;
+    if (xTaskCreate(cal_task, "radio_cal", 4096, NULL, 5, NULL) != pdPASS) { s_cal_state = 0; return -1; }
+    return 0;
+}
+
+void radio_calibrate_status(int *state, uint8_t *testing, uint8_t *result) {
+    if (state)   *state   = s_cal_state;
+    if (testing) *testing = s_cal_testing;
+    if (result)  *result  = s_cal_result;
+}
 
 void radio_set_listening(bool on) {
     s_listen = on;

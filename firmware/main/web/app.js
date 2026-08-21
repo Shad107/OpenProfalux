@@ -382,6 +382,25 @@ $('#sys-save').onclick = async () => {
   await api('/api/config', { method: 'POST', body: JSON.stringify(b) }).catch(() => {});
   b.reboot ? toast('Enregistré, redémarrage…') : savedBtn($('#sys-save'), 'Enregistrer');
 };
+const hex2 = n => '0x' + Number(n).toString(16).toUpperCase().padStart(2, '0');
+if ($('#rxcal-btn')) $('#rxcal-btn').onclick = async () => {
+  const st = $('#rxcal-status'); const btn = $('#rxcal-btn');
+  btn.disabled = true; st.textContent = 'Appuie sur ta télécommande maintenant…';
+  await api('/api/rx/calibrate', { method: 'POST' }).catch(() => {});
+  const poll = setInterval(async () => {
+    const s = await api('/api/rx/calibrate').catch(() => null);
+    if (!s) return;
+    if (s.state === 1) { st.textContent = `Appuie sur ta télécommande… (test ${hex2(s.testing)})`; return; }
+    clearInterval(poll); btn.disabled = false;
+    if (s.state === 2) {
+      st.textContent = `✓ Calibré : gain ${hex2(s.result)} (enregistré)`;
+      if ($('#sys-rxgain')) $('#sys-rxgain').value = String(s.result);
+      await api('/api/config', { method: 'POST', body: JSON.stringify({ rx_gain: s.result }) }).catch(() => {});
+    } else {
+      st.textContent = '✗ Aucune trame captée. Vérifie l\'antenne, ou essaie un autre module CC1101.';
+    }
+  }, 1000);
+};
 $('#mqtt-detect').onclick = async () => {
   const b = $('#mqtt-detect'); b.textContent = 'Recherche…'; b.disabled = true;
   const r = await api('/api/mqtt/discover').catch(() => ({}));

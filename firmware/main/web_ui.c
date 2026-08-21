@@ -461,6 +461,22 @@ static esp_err_t h_ota_pull(httpd_req_t *r) {
     return httpd_resp_sendstr(r, "{\"ok\":0}");
 }
 
+/* ── /api/rx/calibrate : auto-calibrage du gain RX ──
+ * POST lance le balayage (l'utilisateur appuie sur sa telecommande), GET renvoie l'etat. */
+static esp_err_t h_rx_calibrate(httpd_req_t *r) {
+    int rc = radio_calibrate_start();
+    httpd_resp_set_type(r, "application/json");
+    return httpd_resp_sendstr(r, rc == 0 ? "{\"ok\":1}" : (rc == 1 ? "{\"ok\":1,\"busy\":1}" : "{\"ok\":0}"));
+}
+static esp_err_t h_rx_calibrate_status(httpd_req_t *r) {
+    int st = 0; uint8_t testing = 0, result = 0;
+    radio_calibrate_status(&st, &testing, &result);
+    char out[96];
+    snprintf(out, sizeof(out), "{\"state\":%d,\"testing\":%d,\"result\":%d}", st, testing, result);
+    httpd_resp_set_type(r, "application/json");
+    return httpd_resp_sendstr(r, out);
+}
+
 static void reg(httpd_handle_t s, const char *uri, httpd_method_t m, esp_err_t (*h)(httpd_req_t *)) {
     httpd_uri_t u = { .uri = uri, .method = m, .handler = h };
     httpd_register_uri_handler(s, &u);
@@ -502,6 +518,8 @@ void web_ui_start(void) {
     reg(s, "/api/ota/pull",     HTTP_POST, h_ota_pull);
     reg(s, "/api/frames",       HTTP_GET,  h_frames);
     reg(s, "/api/rf",           HTTP_GET,  h_rf);
+    reg(s, "/api/rx/calibrate", HTTP_POST, h_rx_calibrate);
+    reg(s, "/api/rx/calibrate", HTTP_GET,  h_rx_calibrate_status);
     reg(s, "/api/backup",       HTTP_GET,  h_backup);
     reg(s, "/api/restore",      HTTP_POST, h_restore);
     reg(s, "/api/mqtt/discover", HTTP_GET, h_mqtt_discover);

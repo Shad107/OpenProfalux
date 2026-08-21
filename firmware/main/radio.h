@@ -24,3 +24,8 @@ void radio_tx(const char *bits, int repeats);   /* rejoue une trame `repeats` fo
 int  radio_listen_once(uint32_t timeout_ms, char *buf, int max); /* ecoute dediee (apprentissage) — marche tjrs */
 void radio_pause_rx(bool pause);       /* pause TEMPORAIRE pendant nos TX (stream maintien) */
 void radio_set_listening(bool on);     /* interrupteur MAITRE : l'ecoute permanente (case UI "capture") */
+
+/* Auto-calibration du gain RX : balaie les gains, verrouille le 1er qui capte une trame
+ * valide pendant que l'utilisateur appuie sur sa telecommande. Non bloquant (tache de fond). */
+int  radio_calibrate_start(void);      /* 0=lance, 1=deja en cours, -1=erreur */
+void radio_calibrate_status(int *state, uint8_t *testing, uint8_t *result); /* state:0 idle/1 run/2 ok/3 echec */

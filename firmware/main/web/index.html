@@ -157,7 +157,10 @@
               <option value="47">0x2F — gain réduit</option>
               <option value="55">0x37 — gain réduit +</option>
               <option value="63">0x3F — mordant (-17 dB) : si démod bruitée sur signal fort</option>
-            </select></div>
+            </select>
+            <p class="hint" style="margin-top:8px"><button id="rxcal-btn" class="btn" type="button">Calibrer la réception (auto)</button>
+              <span id="rxcal-status" style="margin-left:8px"></span></p>
+            <p class="hint">Clique, puis appuie sur ta télécommande à moins d'1 m : le boîtier teste les gains et verrouille le bon tout seul, sans lire de log.</p></div>
           <label class="switch"><input type="checkbox" id="sys-reboot"><span class="track"></span>
             <span class="lbl">Redémarrer après enregistrement</span></label>
           <div class="row end"><button id="sys-save" class="btn primary">Enregistrer</button></div>
