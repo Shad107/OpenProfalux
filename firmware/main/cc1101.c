@@ -257,6 +257,12 @@ int cc1101_tx_raw_bits(const char *bits, int n, int repeats) {
      * = une vraie rafale de telecommande. Evite un STX/calibration par trame et rend l'emission
      * plus fiable (le bit-bang reste sensible a la preemption, d'ou plusieurs trames). */
     if (repeats < 1) repeats = 1;
+    /* CRITIQUE : couper la capture RMT pendant le bit-bang. Sinon la RMT ecoute GDO0
+     * (l'ecoute permanente l'a armee), capte notre propre TX, deborde ("hw buffer too
+     * small") et son ISR PREEMPTE le bit-bang -> timing 455/910 us deforme -> trame
+     * invalide -> le moteur l'ignore. Critique en environnement bruite (RMT deborde en
+     * continu -> TOUTES les repetitions corrompues). On re-arme apres le SIDLE. */
+    if (s_cap) rmt_disable(s_cap);
     gpio_set_direction(CC1101_PIN_GDO0, GPIO_MODE_INPUT_OUTPUT);
     strobe(CC_STX);
     esp_rom_delay_us(800);   /* laisse le PLL se caler + la PA monter avant de moduler */
@@ -278,6 +284,7 @@ int cc1101_tx_raw_bits(const char *bits, int n, int repeats) {
         esp_rom_delay_us(2000);   /* gap inter-trame */
     }
     strobe(CC_SIDLE);
+    if (s_cap) rmt_enable(s_cap);   /* re-arme la capture RMT pour l'ecoute permanente suivante */
     return 0;
 }
 
