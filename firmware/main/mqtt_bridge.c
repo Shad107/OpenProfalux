@@ -89,7 +89,10 @@ static void mqtt_event_cb(void *arg, esp_event_base_t base, int32_t id, void *ev
             esp_mqtt_client_subscribe(s_mqtt, TOPIC_BASE "/cover/+/set", 1);
             esp_mqtt_client_subscribe(s_mqtt, TOPIC_BASE "/cover/+/set_position", 1);
             esp_mqtt_client_subscribe(s_mqtt, TOPIC_BASE "/ota/pull", 1);
-            esp_mqtt_client_subscribe(s_mqtt, TOPIC_BASE "/frames/log/#", 1);   /* repeuplement du ring si NVS vide */
+            /* PAS d'abonnement a frames/log/# : le ring est deja persiste en SPIFFS (load_ring au boot).
+             * S'y abonner = l'ESP s'auto-inonde de ses propres trames retained (jeu qui grossit sans fin)
+             * au boot -> la tache MQTT traite ce flot en prenant le LOCK pendant que la discovery publie
+             * sous le LOCK -> DEADLOCK au demarrage. Le repeuplement MQTT etait redondant avec SPIFFS. */
             mqtt_pub_system_status();
             publish_log("info", "MQTT connected");
             if (s_hdl.on_connected) s_hdl.on_connected();   /* -> publie la decouverte HA (vraie connexion) */
