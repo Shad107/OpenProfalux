@@ -63,6 +63,7 @@ static volatile bool      s_rx_running = false;
 #define CC_TEST1    0x2D
 #define CC_TEST0    0x2E
 #define CC_PARTNUM  0x30
+#define CC_FREQEST  0x32   /* offset de frequence estime du signal recu (signed) */
 #define CC_RSSI     0x34
 #define CC_MARCSTATE 0x35   /* etat machine radio (0x0D=RX, 0x13=TX, 0x01=IDLE) */
 #define CC_MCSM1    0x17
@@ -442,6 +443,10 @@ int cc1101_rx_listen_bits(uint32_t timeout_ms, char *out_bits, int max_bits) {
                  * Attendu propre : preambule L455/H455 alternes, entete L>3500, bits H455('1')/H910('0').
                  * Erratique (<200us, valeurs folles) = bruit RF qui dechire la trame. */
                 if (drssi > -70) {
+                    /* FREQEST : offset de freq estime. |grand| = quartz du module decale
+                     * (RX desaccordee du 868.35 -> demod OOK distordue). ~26MHz/2^14 ≈ 1587 Hz/pas. */
+                    int8_t fq = (int8_t)cc1101_read_reg(CC_FREQEST | 0x40);
+                    int fq_khz = (int)fq * 1587 / 1000;
                     char dbuf[320]; int p = 0;
                     int lim = ev.num_symbols < 20 ? (int)ev.num_symbols : 20;
                     for (int k = 0; k < lim && p < 300; k++) {
@@ -450,7 +455,8 @@ int cc1101_rx_listen_bits(uint32_t timeout_ms, char *out_bits, int max_bits) {
                                       s->level0 ? 'H' : 'L', (unsigned)s->duration0,
                                       s->level1 ? 'H' : 'L', (unsigned)s->duration1);
                     }
-                    ESP_LOGW(TAG, "DIAG RAW (RSSI %d, %d/%u symb, us): %s", drssi, lim, (unsigned)ev.num_symbols, dbuf);
+                    ESP_LOGW(TAG, "DIAG RAW (RSSI %d, FREQEST %d ~%d kHz, %d/%u symb, us): %s",
+                             drssi, fq, fq_khz, lim, (unsigned)ev.num_symbols, dbuf);
                 }
             }
             if (n >= 64) { r = n; break; }                                  /* vraie trame */
