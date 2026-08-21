@@ -437,6 +437,21 @@ int cc1101_rx_listen_bits(uint32_t timeout_ms, char *out_bits, int max_bits) {
                 else
                     ESP_LOGW(TAG, "DIAG RX: %u symb, RSSI %d dBm, PAS d'entete HCS => pas du Profalux/KeeLoq (ou bruit)",
                              (unsigned)ev.num_symbols, drssi);
+                /* Signal FORT (> -70 dBm = la telecommande, pas le bruit) : dump des durees
+                 * brutes des 1res impulsions (us) pour voir la forme d'onde reelle.
+                 * Attendu propre : preambule L455/H455 alternes, entete L>3500, bits H455('1')/H910('0').
+                 * Erratique (<200us, valeurs folles) = bruit RF qui dechire la trame. */
+                if (drssi > -70) {
+                    char dbuf[320]; int p = 0;
+                    int lim = ev.num_symbols < 20 ? (int)ev.num_symbols : 20;
+                    for (int k = 0; k < lim && p < 300; k++) {
+                        const rmt_symbol_word_t *s = &ev.received_symbols[k];
+                        p += snprintf(dbuf + p, sizeof(dbuf) - p, "%c%u %c%u ",
+                                      s->level0 ? 'H' : 'L', (unsigned)s->duration0,
+                                      s->level1 ? 'H' : 'L', (unsigned)s->duration1);
+                    }
+                    ESP_LOGW(TAG, "DIAG RAW (RSSI %d, %d/%u symb, us): %s", drssi, lim, (unsigned)ev.num_symbols, dbuf);
+                }
             }
             if (n >= 64) { r = n; break; }                                  /* vraie trame */
             if (rmt_receive(s_cap, s_capbuf, sizeof(s_capbuf), &rc) != ESP_OK) break;  /* re-arme */
