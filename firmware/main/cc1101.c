@@ -19,6 +19,14 @@
 #include <driver/rmt_rx.h>
 
 static const char *TAG = "cc1101";
+/* ── Switch DEBUG capture RX (runtime, togglable depuis l'UI/MQTT) ──────────
+ * Quand ON : logge CHAQUE paquet capte en ecoute (symboles RMT + RSSI + bits
+ * decodes + classification KeeLoq), y compris les trames <64 bits normalement
+ * jetees. Sert a diagnostiquer "ca ne capte pas" : distingue antenne morte /
+ * reception mais decode KO / pas du Profalux. OFF par defaut (log verbeux). */
+static volatile bool s_rx_debug = false;
+void cc1101_set_rx_debug(bool on) { s_rx_debug = on; ESP_LOGW(TAG, "DEBUG capture RX %s", on ? "ON" : "OFF"); }
+bool cc1101_get_rx_debug(void)    { return s_rx_debug; }
 int g_tx_marc = -1;   /* MARCSTATE lu juste apres le dernier STX (0x13=TX). Diagnostic expose via HTTP. */
 static spi_device_handle_t s_spi = NULL;
 static rmt_channel_handle_t s_cap = NULL;
@@ -399,6 +407,21 @@ int cc1101_rx_listen_bits(uint32_t timeout_ms, char *out_bits, int max_bits) {
         while (esp_timer_get_time() < t_end) {
             if (xQueueReceive(s_capq, &ev, pdMS_TO_TICKS(100)) != pdTRUE) continue;  /* tjrs en RX */
             int n = decode_rmt(ev.received_symbols, ev.num_symbols, out_bits, max_bits);
+            /* Switch DEBUG : logge les captures "interessantes" : entete HCS trouvee
+             * (n>=1) OU grosse rafale (>=50 symboles) meme sans entete (= reception 868
+             * forte mais pas HCS). Filtre le petit bruit epars pour rester lisible. */
+            if (s_rx_debug && (n >= 1 || ev.num_symbols >= 50)) {
+                int8_t drssi = cc1101_get_rssi();
+                if (n >= 64)
+                    ESP_LOGW(TAG, "DIAG RX: %u symb, RSSI %d dBm, %d bits => TRAME PROFALUX/KEELOQ complete: %s",
+                             (unsigned)ev.num_symbols, drssi, n, out_bits);
+                else if (n >= 1)
+                    ESP_LOGW(TAG, "DIAG RX: %u symb, RSSI %d dBm, entete HCS OK mais %d bits (partiel/tronque): %s",
+                             (unsigned)ev.num_symbols, drssi, n, out_bits);
+                else
+                    ESP_LOGW(TAG, "DIAG RX: %u symb, RSSI %d dBm, PAS d'entete HCS => pas du Profalux/KeeLoq (ou bruit)",
+                             (unsigned)ev.num_symbols, drssi);
+            }
             if (n >= 64) { r = n; break; }                                  /* vraie trame */
             if (rmt_receive(s_cap, s_capbuf, sizeof(s_capbuf), &rc) != ESP_OK) break;  /* re-arme */
         }

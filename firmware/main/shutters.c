@@ -78,6 +78,40 @@ static bool     s_pos_dirty = false;     /* position d'un volet a changer/figer 
 #define LOCK()   xSemaphoreTake(s_lock, portMAX_DELAY)
 #define UNLOCK() xSemaphoreGive(s_lock)
 
+/* ── Publication MQTT DIFFEREE (anti-deadlock) ──────────────────────────────
+ * REGLE ABSOLUE : ne JAMAIS appeler mqtt_pub_raw sous le LOCK. Un handler MQTT
+ * entrant (cover/set, set_position...) reprend ce meme LOCK ; publier sous LOCK
+ * peut bloquer (outbox pleine, ou la tache MQTT est justement bloquee) -> attente
+ * mutuelle = deadlock (httpd/tick/commandes tous figes). On EMPILE le message sous
+ * LOCK (malloc seulement, jamais bloquant) puis on PUBLIE apres le UNLOCK via
+ * pub_flush(). Voir aussi shutters_on_rx (meme principe, deja applique). */
+typedef struct pubmsg { struct pubmsg *next; int qos, retain; char *topic; char *payload; } pubmsg_t;
+static pubmsg_t *s_pub_head, *s_pub_tail;   /* file simple, touchee UNIQUEMENT sous LOCK */
+
+/* Empile une publication. Appele SOUS LOCK. Copie topic+payload sur le tas. */
+static void pub_defer(const char *topic, const char *payload, int qos, int retain) {
+    pubmsg_t *m = malloc(sizeof(*m));
+    if (!m) return;
+    m->next = NULL; m->qos = qos; m->retain = retain;
+    m->topic = strdup(topic); m->payload = strdup(payload);
+    if (!m->topic || !m->payload) { free(m->topic); free(m->payload); free(m); return; }
+    if (s_pub_tail) s_pub_tail->next = m; else s_pub_head = m;
+    s_pub_tail = m;
+}
+
+/* Vide la file en publiant HORS LOCK. A appeler APRES chaque UNLOCK qui a empile
+ * (jamais en tenant le LOCK : pub_flush reprend le LOCK pour detacher la file). */
+static void pub_flush(void) {
+    if (!s_pub_head) return;                 /* rapide : rien a publier (course benigne) */
+    LOCK(); pubmsg_t *m = s_pub_head; s_pub_head = s_pub_tail = NULL; UNLOCK();
+    while (m) {
+        pubmsg_t *n = m->next;
+        mqtt_pub_raw(m->topic, m->payload, m->qos, m->retain);
+        free(m->topic); free(m->payload); free(m);
+        m = n;
+    }
+}
+
 static void update_listening(void);   /* (defini plus bas) : allume le RX si volet appris OU option capture */
 
 static volet_t *find_volet(const char *id) {
@@ -447,11 +481,11 @@ static void publish_volet_state(volet_t *v) {
     if (s_log_frames) {   /* position publiee seulement si suivi actif (coherent avec la decouverte + l'UI) */
         snprintf(topic, sizeof(topic), "openprofalux/cover/%s/position", slug);
         snprintf(pl, sizeof(pl), "%d", 100 - (int)(v->position + 0.5f));   /* HA = % d'OUVERTURE (100=ouvert) ; interne = fermeture */
-        mqtt_pub_raw(topic, pl, 0, 1);
+        pub_defer(topic, pl, 0, 1);
     }
     ha_state_str(v, st);
     snprintf(topic, sizeof(topic), "openprofalux/cover/%s/state", slug);
-    mqtt_pub_raw(topic, st, 0, 1);
+    pub_defer(topic, st, 0, 1);
     v->pub_pos = (int)(v->position + 0.5f); v->pub_dir = v->dir;
 }
 /* Publie la config HA discovery d'un cover (retained). Appele sous LOCK. */
@@ -496,7 +530,7 @@ static void announce_one(volet_t *v) {
         "\"device\":{\"identifiers\":[\"openprofalux\"],\"name\":\"%s\","
         "\"manufacturer\":\"isno.fr\",\"model\":\"OpenProfalux\",\"configuration_url\":\"%s\"}}",
         v->id, slug, slug, slug, pos, slug, s_device, devname, cu);
-    mqtt_pub_raw(topic, pl, 1, 1);
+    pub_defer(topic, pl, 1, 1);
     free(pl);
     publish_volet_state(v);
 }
@@ -517,14 +551,14 @@ static void announce_extras(void) {
         "{\"name\":\"Ecoute RF permanente\",\"unique_id\":\"openprofalux_listen\",\"object_id\":\"openprofalux_listen\","
         "\"command_topic\":\"openprofalux/listen/set\",\"state_topic\":\"openprofalux/listen/state\","
         "\"payload_on\":\"ON\",\"payload_off\":\"OFF\",\"icon\":\"mdi:radio-tower\",%s}", dev);
-    mqtt_pub_raw("homeassistant/switch/openprofalux_listen/config", pl, 1, 1);
+    pub_defer("homeassistant/switch/openprofalux_listen/config", pl, 1, 1);
     snprintf(pl, 700,
         "{\"name\":\"Derniere trame RF\",\"unique_id\":\"openprofalux_last_frame\",\"object_id\":\"openprofalux_last_frame\","
         "\"state_topic\":\"openprofalux/frames/last\",\"value_template\":\"{{ value_json.hop }}\","
         "\"json_attributes_topic\":\"openprofalux/frames/last\",\"icon\":\"mdi:remote\",%s}", dev);
-    mqtt_pub_raw("homeassistant/sensor/openprofalux_last_frame/config", pl, 1, 1);
+    pub_defer("homeassistant/sensor/openprofalux_last_frame/config", pl, 1, 1);
     free(pl);
-    mqtt_pub_raw("openprofalux/listen/state", s_log_frames ? "ON" : "OFF", 0, 1);
+    pub_defer("openprofalux/listen/state", s_log_frames ? "ON" : "OFF", 0, 1);
 }
 
 /* ── API commande ── */
@@ -563,6 +597,7 @@ int shutters_cmd(const char *id, const char *cmd, int value) {
     }
     publish_volet_state(v);
     UNLOCK();
+    pub_flush();
     return 0;
 }
 
@@ -601,6 +636,7 @@ static void tick_task(void *arg) {
                 publish_volet_state(v);
         }
         UNLOCK();
+        pub_flush();   /* publie les changements de position/etat HORS LOCK */
         if (s_pos_dirty) { s_pos_dirty = false; LOCK(); save_cfg(); UNLOCK(); }   /* fige la nouvelle position en NVS (retenue au reboot) */
         /* sauvegarde periodique du dataset en NVS (hors LOCK ; menage la flash : ~60 s si modifie) */
         if (++save_ticks * TICK_MS >= 60000) {
@@ -632,6 +668,7 @@ int shutters_learn_assign(const char *id, const char *action, const char *bits) 
     announce_one(v);       /* (re)publie le cover HA des qu'il est appris */
     update_listening();    /* 1er volet appris -> allume l'ecoute pour le suivi de position */
     UNLOCK();
+    pub_flush();
     return 0;
 }
 
@@ -660,6 +697,7 @@ int shutters_reassign(const char *id, const char *from, const char *to) {
     save_cfg();
     announce_one(v);
     UNLOCK();
+    pub_flush();
     ESP_LOGW(TAG, "reaffectation '%s' %s <-> %s", id, from, to);
     return 0;
 }
@@ -733,25 +771,6 @@ static void dataset_log_frame(const char *shex, uint8_t button, uint32_t hop, in
     if (rm->nhops < rm->caphops) { rm->hops[rm->nhops++] = (dframe_t){ .hop = hop, .t = t, .button = button }; s_frames_dirty = true; }
     /* Plus de publication frames/<serial> ni /count : une seule structure MQTT = l'anneau frames/log/<n>.
      * Le dataset slide (hops distincts) reste construit ici en RAM/NVS pour l'export /api/frames. */
-}
-
-/* Rattrapage a la connexion : pousse TOUT le ring (trames captees hors-ligne) vers MQTT,
- * du plus ancien au plus recent -> dataset (dedup) + anneau retained frames/log/<slot>.
- * Realise le modele tampon : capte toujours, buffer si MQTT absent, flush a l'activation.
- * Appele sous LOCK, no-op si option off ou MQTT absent. */
-static void flush_frame_ring_locked(void) {
-    if (!s_log_frames || !s_mqtt_ready) return;
-    char lt[48], lf[128];
-    for (int k = 0; k < RF_RING; k++) {
-        int slot = (s_rfhead + k) % RF_RING;
-        rfrec_t *r = &s_rf[slot];
-        if (!r->serial[0]) continue;
-        dataset_log_frame(r->serial, r->button, r->hop, r->rssi, r->t);   /* dataset slide (dedup) */
-        snprintf(lf, sizeof(lf), "{\"serial\":\"%s\",\"button\":\"0x%X\",\"hop\":\"0x%08X\",\"rssi\":%d,\"t\":%u}",
-                 r->serial, r->button, (unsigned)r->hop, r->rssi, (unsigned)r->t);
-        snprintf(lt, sizeof(lt), "openprofalux/frames/log/%d", slot);
-        mqtt_pub_raw(lt, lf, 1, 1);   /* QoS 1 (confirme) + retained : recuperable via frames/log/# */
-    }
 }
 
 /* ══ FONCTION 2 — Suivi de position via telecommandes ENREGISTREES ══
@@ -920,6 +939,7 @@ int shutters_import_json(const char *js) {
     for (int i = 0; i < s_nvolets; i++) announce_one(&s_volets[i]);   /* re-publie les covers HA restaures */
     update_listening();
     UNLOCK();
+    pub_flush();
     cJSON_Delete(root);
     ESP_LOGI(TAG, "config restauree : %d volets, %d telecommandes", s_nvolets, s_nremotes);
     return 0;
@@ -932,8 +952,12 @@ void shutters_mqtt_announce(const char *device) {
     s_mqtt_ready = true;
     for (int i = 0; i < s_nvolets; i++) announce_one(&s_volets[i]);
     announce_extras();           /* switch "Ecoute RF permanente" + capteur "Derniere trame" */
-    flush_frame_ring_locked();   /* rattrapage : envoie les dernieres trames du ring des la connexion */
     UNLOCK();
+    pub_flush();                 /* publie la decouverte HORS LOCK (anti-deadlock a la connexion) */
+    /* NB : plus de flush en masse du ring ici. Les frames/log/<slot> sont QoS1 RETAINED
+     * (le broker les garde deja) + persistees en SPIFFS ; re-pousser tout le ring (jusqu'a
+     * 1000 QoS1) SOUS LOCK dans la tache MQTT tenait le LOCK trop longtemps -> httpd/commandes
+     * figes ("plante"). Les nouvelles trames sont publiees en direct par shutters_on_rx. */
     ESP_LOGI(TAG, "HA discovery publiee pour %d cover(s), device=%s", s_nvolets, s_device);
 }
 
@@ -1012,10 +1036,10 @@ void shutters_set_log_frames(bool on) {
     update_listening();
     LOCK();
     save_cfg();                                        /* persiste l'ecoute permanente -> restauree au boot */
-    if (on) flush_frame_ring_locked();                 /* si MQTT deja connecte : rattrape le ring tout de suite */
     for (int i = 0; i < s_nvolets; i++) announce_one(&s_volets[i]);   /* re-publie la decouverte : position apparait/disparait selon l'option */
-    if (s_mqtt_ready) mqtt_pub_raw("openprofalux/listen/state", on ? "ON" : "OFF", 0, 1);   /* etat du switch HA */
+    if (s_mqtt_ready) pub_defer("openprofalux/listen/state", on ? "ON" : "OFF", 0, 1);   /* etat du switch HA */
     UNLOCK();
+    pub_flush();
     ESP_LOGI(TAG, "log_frames=%d", on);
 }
 

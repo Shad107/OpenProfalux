@@ -1,9 +1,6 @@
 idf_component_register(
     SRCS
         "main.c"
-        "keeloq.c"
-        "pfx_keys.c"
-        "profalux.c"
         "cc1101.c"
         "wifi_bridge.c"
         "mqtt_bridge.c"

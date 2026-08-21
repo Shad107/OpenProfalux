@@ -88,15 +88,6 @@
 #define PROFALUX_PREAMBLE_US            455    /* = Te */
 #define PROFALUX_HEADER_US             4450    /* silence mesure 4420-4491 us */
 #define PROFALUX_REPEAT_COUNT            10  /* HCS301 typical */
-
-/* Boutons Profalux (=confirmés captures beedec65) */
-#define PFX_BTN_DOWN                   0x01
-#define PFX_BTN_STOP                   0x02
-#define PFX_BTN_UP                     0x04
-#define PFX_BTN_PROG                   0x08  /* Hypothèse: PROG button code */
-
-/* Pair window duration (=60s selon procédure officielle Profalux) */
-#define PROFALUX_PAIR_WINDOW_MS       60000
 #define PROFALUX_PAIR_FRAMES             60  /* 1 par seconde */
 #define PROFALUX_PAIR_DELAY_MS         1000
 

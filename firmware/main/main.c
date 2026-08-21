@@ -17,9 +17,7 @@
 #include <nvs.h>
 
 #include "hardware_config.h"
-#include "profalux.h"
 #include "cc1101.h"
-#include "driver/gpio.h"
 #include "wifi_bridge.h"
 #include "mqtt_bridge.h"
 #include "shutters.h"
@@ -31,6 +29,7 @@
 
 static const char *TAG = "main";
 static bool s_log_frames = false;   /* option UI "capture toutes les trames" (namespace cfg) */
+static bool s_debug      = false;   /* switch UI "debug console" : logge chaque capture RX */
 
 /* Device name / config from NVS */
 static char s_device_name[32] = "volet_test";
@@ -39,8 +38,6 @@ static char s_wifi_pass[64]   = "";
 static char s_mqtt_uri[160]   = "mqtt://ha.local:1883";
 static char s_mqtt_user[128]  = "";   /* certains brokers utilisent des tokens JWT longs */
 static char s_mqtt_pass[256]  = "";   /* HA peut generer des mdp broker >64 : marge (nvs_get_str echoue si buffer trop court -> champ vide -> 'not authorized'). Aligne sur OpenXtraflame. */
-
-static pfx_tx_state_t g_state;
 
 /* Load user config from NVS "cfg" namespace */
 static void load_config(void) {
@@ -54,56 +51,23 @@ static void load_config(void) {
     sz = sizeof(s_mqtt_user);   nvs_get_str(h, "mqtt_user", s_mqtt_user, &sz);
     sz = sizeof(s_mqtt_pass);   nvs_get_str(h, "mqtt_pass", s_mqtt_pass, &sz);
     uint8_t lf = 0; nvs_get_u8(h, "log_frames", &lf); s_log_frames = lf;
+    uint8_t db = 0; nvs_get_u8(h, "debug", &db); s_debug = db;
     nvs_close(h);
     /* Nom d'appareil vide -> defaut : sinon client_id MQTT vide + topic de disponibilite
      * qui ne coincide pas avec la decouverte HA. */
     if (!s_device_name[0]) strlcpy(s_device_name, "openprofalux", sizeof(s_device_name));
 }
 
-/* Publish state JSON */
+/* Publish state JSON (heartbeat : etat liaison + heap libre) */
 static void publish_state(const char *last_cmd) {
-    char json[256];
+    char json[192];
     snprintf(json, sizeof(json),
-        "{\"serial\":\"0x%08X\",\"counter\":%u,\"last_cmd\":\"%s\","
-         "\"rssi\":%d,\"free_heap\":%u}",
-        (unsigned)g_state.serial, (unsigned)g_state.counter, last_cmd,
-        wifi_bridge_rssi(), (unsigned)esp_get_free_heap_size());
+        "{\"last_cmd\":\"%s\",\"rssi\":%d,\"free_heap\":%u}",
+        last_cmd, wifi_bridge_rssi(), (unsigned)esp_get_free_heap_size());
     mqtt_pub_state(s_device_name, json);
-    ESP_LOGI(TAG, "State published: counter=%u last=%s", (unsigned)g_state.counter, last_cmd);
 }
 
 /* ────── MQTT handlers ────── */
-
-static void on_pair(const char *device) {
-    (void)device;
-    /* NATIF Profalux, notice platine radio etape 4.1 : le nouvel emetteur fait
-     * Stop+P = bouton 0x8 (trame que la VRAIE telecommande emet pour enroler,
-     * prouvee par la capture du 10/08). Emis 5 s, compteur INCREMENTE (anti-replay). */
-    ESP_LOGI(TAG, "▶ ENROLEMENT NATIF 4.1 : Stop+P = bouton 0x8, maintenu 5 s.");
-    ESP_LOGI(TAG, "  PUIS (vraie telecommande) : montee+Stop, descente+Stop, montee+Stop (SANS butees).");
-    pfx_emit_hold(&g_state, PFX_BTN_PROG, 5000);
-    mqtt_pub_pair_result(s_device_name, true, 1);
-    publish_state("PAIR");
-}
-
-static void on_reset(const char *device) {
-    (void)device;
-    ESP_LOGW(TAG, "⚠ RESET: generating new random state. LOSES PAIRING!");
-    pfx_state_reset(&g_state);
-    publish_state("RESET");
-}
-
-static void on_cmd(const char *device, const char *btn) {
-    (void)device;
-    uint8_t b = 0;
-    if      (strcmp(btn, "UP")   == 0) b = PFX_BTN_UP;
-    else if (strcmp(btn, "STOP") == 0) b = PFX_BTN_STOP;
-    else if (strcmp(btn, "DOWN") == 0) b = PFX_BTN_DOWN;
-    else { ESP_LOGW(TAG, "Unknown button: %s", btn); return; }
-    ESP_LOGI(TAG, "▶ CMD %s", btn);
-    pfx_emit_command(&g_state, b);
-    publish_state(btn);
-}
 
 static void on_ota_pull(const char *url) {
     ESP_LOGI(TAG, "▶ OTA pull depuis %s", url);
@@ -113,9 +77,8 @@ static void on_mqtt_connected(void) {
     shutters_mqtt_announce(s_device_name);   /* publie la decouverte HA a la VRAIE connexion broker */
 }
 
-/* NB : l'ancien chemin RX MQTT (rx_frame_cb / on_listen_start / on_listen_stop +
- * cc1101_rx_start) est remplace par le module radio (RX permanent arbitre), demarre
- * par shutters_init(). Les trames recues sont routees vers shutters_on_rx en interne. */
+/* NB : le RX radio (capture permanente arbitree) est demarre par shutters_init() ;
+ * les trames recues sont routees vers shutters_on_rx en interne. */
 
 /* ────── App entry ────── */
 
@@ -138,10 +101,7 @@ void app_main(void) {
     ESP_LOGI(TAG, "device=%s wifi_ssid=%s mqtt=%s",
              s_device_name, s_wifi_ssid, s_mqtt_uri);
 
-    /* 3. Profalux state */
-    pfx_state_init(&g_state);
-
-    /* 4. CC1101 */
+    /* 3. CC1101 */
     if (cc1101_init() != 0) {
         ESP_LOGE(TAG, "CC1101 init FAILED. Check wiring per hardware_config.h");
     }
@@ -155,6 +115,7 @@ void app_main(void) {
     /* 4c. Modele cover + arbitre radio (RX permanent gere en interne) */
     shutters_init();
     if (s_log_frames) shutters_set_log_frames(true);
+    cc1101_set_rx_debug(s_debug);   /* switch DEBUG console restaure au boot */
 
     /* 5. Wi-Fi */
     wifi_bridge_init();
@@ -184,7 +145,6 @@ void app_main(void) {
         /* Handlers AVANT le start : la decouverte HA est publiee sur l'evenement CONNECTED
          * (vraie connexion), plus au boot a l'aveugle. Le statut UI suit CONNECTED/DISCONNECTED. */
         mqtt_handlers_t h = {
-            .on_pair = on_pair, .on_reset = on_reset, .on_cmd = on_cmd,
             .on_message = shutters_mqtt_on_message,   /* cover HA */
             .on_ota_pull = on_ota_pull,               /* OTA pull */
             .on_connected = on_mqtt_connected,        /* -> publie la decouverte HA */
@@ -196,42 +156,15 @@ void app_main(void) {
                           strlen(s_mqtt_pass) ? s_mqtt_pass : NULL);
     }
 
-    /* Trigger LOCAL pour le test d'enrolement (pas besoin de MQTT/WiFi) :
-     * appui sur le bouton integre de l'ATOM Lite (GPIO39) -> burst d'appairage. */
-    gpio_config_t btn = { .pin_bit_mask = 1ULL << 39, .mode = GPIO_MODE_INPUT };
-    gpio_config(&btn);
-    ESP_LOGI(TAG, "PRET. Bouton ATOM (G39) = burst appairage. Identite serial=0x%08X counter=%u.",
-             (unsigned)g_state.serial, (unsigned)g_state.counter);
+    ESP_LOGI(TAG, "PRET (%s). Pilotage via HA/MQTT + UI web. Capture/replay actif.", TARGET_NAME);
 
-    /* Bouton ATOM (G39) :
-     *   - appui LONG (>1,5 s) = ENROLEMENT (burst bouton PROG 0x8)
-     *   - appui court        = PILOTAGE, cycle MONTEE -> STOP -> DESCENTE
-     * Une seule image pour enroler puis piloter sans reflasher. */
-    const uint8_t  seq[3]  = { PFX_BTN_UP, PFX_BTN_STOP, PFX_BTN_DOWN };
-    const char    *seqn[3] = { "MONTEE", "STOP", "DESCENTE" };
-    int si = 0;
-
-    int prev = 1; uint32_t hb = 0; bool ota_marked = false;
+    /* Boucle de fond : heartbeat MQTT (~60 s) + validation de l'image OTA apres ~60 s
+     * (rollback safety). Le capture/replay + le suivi de position tournent dans le
+     * module radio et la tache shutters. */
+    uint32_t hb = 0; bool ota_marked = false;
     while (1) {
-        int now = gpio_get_level(39);
-        if (prev == 1 && now == 0) {          /* front descendant = debut appui */
-            uint32_t held = 0;
-            while (gpio_get_level(39) == 0) { vTaskDelay(pdMS_TO_TICKS(20)); held += 20; }
-            if (held >= 1500) {
-                ESP_LOGI(TAG, ">>> Appui LONG (%ums) : ENROLEMENT (bouton PROG 0x8) <<<",
-                         (unsigned)held);
-                on_pair(s_device_name);
-            } else {
-                ESP_LOGI(TAG, ">>> Appui court : commande %s (serial=0x%08X counter=%u) <<<",
-                         seqn[si], (unsigned)g_state.serial, (unsigned)g_state.counter);
-                pfx_emit_command(&g_state, seq[si]);
-                si = (si + 1) % 3;
-            }
-            now = 1;                            /* relache */
-        }
-        prev = now;
         if (++hb >= 1200) { hb = 0; publish_state("HEARTBEAT");
-            if (!ota_marked) { ota_mark_valid(); ota_marked = true; }  /* valide l'image OTA apres ~60 s */
+            if (!ota_marked) { ota_mark_valid(); ota_marked = true; }
         }
         vTaskDelay(pdMS_TO_TICKS(50));
     }

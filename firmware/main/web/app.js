@@ -358,6 +358,7 @@ async function loadConfig() {
     ? `•••••••• (${c.mqtt_pass_len} car. enregistrés, laisser vide pour ne pas changer)`
     : 'mot de passe du broker';
   $('#sys-device').value = c.device || ''; $('#sys-logframes').checked = !!c.log_frames;
+  if ($('#sys-debug')) $('#sys-debug').checked = !!c.debug;
   if ($('#mqtt-device')) $('#mqtt-device').value = c.device || '';
   const st = await api('/api/ota/status').catch(() => ({}));
   $('#ota-version').textContent = st.version || '…';
@@ -376,7 +377,7 @@ $('#mqtt-save').onclick = async () => {
   toast('MQTT enregistré, redémarrage…');
 };
 $('#sys-save').onclick = async () => {
-  const b = { device: $('#sys-device').value.trim(), log_frames: $('#sys-logframes').checked, reboot: $('#sys-reboot').checked };
+  const b = { device: $('#sys-device').value.trim(), log_frames: $('#sys-logframes').checked, debug: $('#sys-debug').checked, reboot: $('#sys-reboot').checked };
   await api('/api/config', { method: 'POST', body: JSON.stringify(b) }).catch(() => {});
   b.reboot ? toast('Enregistré, redémarrage…') : savedBtn($('#sys-save'), 'Enregistrer');
 };

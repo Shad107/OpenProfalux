@@ -40,6 +40,8 @@ int  cc1101_tx_raw_bits(const char *bits, int n, int repeats);
 /* Utils */
 extern int g_tx_marc;   /* MARCSTATE lu apres le dernier STX (0x13=TX). Diagnostic. */
 int8_t cc1101_get_rssi(void);
+void cc1101_set_rx_debug(bool on);   /* switch DEBUG : logge chaque capture RX (symboles+RSSI+bits+classif) */
+bool cc1101_get_rx_debug(void);
 uint8_t cc1101_read_reg(uint8_t addr);
 void   cc1101_write_reg(uint8_t addr, uint8_t val);
 
