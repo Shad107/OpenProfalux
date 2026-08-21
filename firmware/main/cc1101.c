@@ -296,19 +296,13 @@ int cc1101_capture_init(void) {
 
 /* Emet la trame ET capture GDO0, decode la forme d'onde en bits (ordre du fil).
  * Retourne le nombre de bits decodes (<0 = erreur). bit=1 si HAUT court (H<680us). */
-/* Decode une capture RMT (forme d'onde OOK HCS30x) en bits. Retourne nbits. */
-static int decode_rmt(const rmt_symbol_word_t *sym, size_t n, char *out, int max_bits) {
-    int hdr = -1, hdr_in_dur0 = 0;
-    for (size_t i = 0; i < n; i++) {
-        if (!sym[i].level0 && sym[i].duration0 > 3500) { hdr = (int)i; hdr_in_dur0 = 1; break; }
-        if (!sym[i].level1 && sym[i].duration1 > 3500) { hdr = (int)i; hdr_in_dur0 = 0; break; }
-    }
-    if (hdr < 0) return -4;
+/* Decode les bits a partir d'UNE entete candidate (index hdr, LOW long). Retourne nb bits. */
+static int decode_from_header(const rmt_symbol_word_t *sym, size_t n, int hdr, int hdr_in_dur0,
+                              char *out, int max_bits) {
     int nb = 0;
     /* Correctif off-by-one : si l'entete (LOW long) est dans duration0, alors le HIGH
-     * du PREMIER bit de data est deja dans duration1 du MEME symbole. L'ancien code
-     * demarrait a hdr+1 et perdait ce bit -> trame decalee (serial = attendu>>1) et
-     * rejeu invalide. On l'emet ici avant de continuer. */
+     * du PREMIER bit de data est deja dans duration1 du MEME symbole. Sans ca la trame
+     * est decalee (serial = attendu>>1) et le rejeu est invalide. On l'emet ici. */
     if (hdr_in_dur0 && sym[hdr].level1 && sym[hdr].duration1 >= 200 && sym[hdr].duration1 <= 1300) {
         out[nb++] = (sym[hdr].duration1 < 680) ? '1' : '0';
     }
@@ -321,6 +315,28 @@ static int decode_rmt(const rmt_symbol_word_t *sym, size_t n, char *out, int max
     }
     out[nb] = 0;
     return nb;
+}
+
+/* Decode une capture RMT (OOK HCS30x) en bits. ROBUSTE AU BRUIT : au lieu de s'arreter
+ * a la 1re entete (souvent un simple trou de bruit -> 2-3 bits bidons), on SCANNE toutes
+ * les entetes candidates (LOW long >3500us) et on garde la MEILLEURE trame. La trame
+ * Profalux est repetee ~10x dans la rafale : il y en a forcement une propre a trouver.
+ * Retourne nb bits (max sur toutes les entetes), -4 si aucune entete. */
+static int decode_rmt(const rmt_symbol_word_t *sym, size_t n, char *out, int max_bits) {
+    int best = -4;
+    char tmp[80];
+    int tmpcap = max_bits < 79 ? max_bits : 79;
+    for (size_t i = 0; i < n; i++) {
+        int hdr = -1, in0 = 0;
+        if      (!sym[i].level0 && sym[i].duration0 > 3500) { hdr = (int)i; in0 = 1; }
+        else if (!sym[i].level1 && sym[i].duration1 > 3500) { hdr = (int)i; in0 = 0; }
+        if (hdr < 0) continue;
+        int nb = decode_from_header(sym, n, hdr, in0, tmp, tmpcap);
+        if (nb > best) { best = nb; memcpy(out, tmp, (size_t)nb + 1); }   /* garde la meilleure */
+        if (best >= 64) break;                                            /* trame complete : stop */
+    }
+    if (best < 0) { out[0] = 0; return -4; }
+    return best;
 }
 
 int cc1101_tx_and_capture_bits(const uint8_t *frame, size_t bits, char *out_bits, int max_bits) {
