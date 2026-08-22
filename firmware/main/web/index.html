@@ -161,6 +161,9 @@
             <p class="hint" style="margin-top:8px"><button id="rxcal-btn" class="btn" type="button">Calibrer la réception (auto)</button>
               <span id="rxcal-status" style="margin-left:8px"></span></p>
             <p class="hint">Clique, puis <b>appuie en continu / répète les appuis</b> sur ta télécommande à moins d'1 m pendant tout le test (~25 s) : le boîtier teste chaque gain 6 s et verrouille le bon dès qu'il capte une trame valide. Presse à chaque changement de valeur affiché.</p></div>
+          <div class="field" style="margin-top:12px"><label>TE d'émission (µs) — timing radio du rejeu</label>
+            <input id="sys-txte" type="number" min="200" max="900" step="1" placeholder="455">
+            <p class="hint">455 = Profalux (défaut). Les autres variantes PFX ont un TE différent (ex FranciaFlex ≈ 415) : si le rejeu n'active pas le moteur, ajuste ici pour matcher. Tu lis le TE réel de ta télécommande dans le DIAG RAW (durée du bit '1' court en µs).</p></div>
           <label class="switch"><input type="checkbox" id="sys-reboot"><span class="track"></span>
             <span class="lbl">Redémarrer après enregistrement</span></label>
           <div class="row end"><button id="sys-save" class="btn primary">Enregistrer</button></div>

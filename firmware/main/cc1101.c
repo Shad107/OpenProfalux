@@ -33,6 +33,12 @@ bool cc1101_get_rx_debug(void)    { return s_rx_debug; }
 static volatile uint8_t s_rx_gain = 0x27;
 void cc1101_set_rx_gain(uint8_t v) { s_rx_gain = v; ESP_LOGW(TAG, "RX gain AGCCTRL2=0x%02X", v); }
 uint8_t cc1101_get_rx_gain(void)   { return s_rx_gain; }
+/* Timing d'EMISSION reglable : TE (temps elementaire). Defaut 455 us (Profalux). Les autres
+ * variantes PFX roulent a un TE different (ex FranciaFlex ~415). On derive bit '1'=TE, '0'=2*TE,
+ * preambule=TE, entete proportionnelle. Permet au rejeu de matcher le timing du recepteur. */
+static volatile uint32_t s_tx_te = PROFALUX_TE_US;
+void cc1101_set_tx_te(uint32_t te) { if (te >= 200 && te <= 900) { s_tx_te = te; ESP_LOGW(TAG, "TX TE=%u us", (unsigned)te); } }
+uint32_t cc1101_get_tx_te(void)    { return s_tx_te; }
 /* Diagnostic radio expose a l'UI : detection de la puce + resultat du self-test TX. */
 static int     s_tx_ok   = -1;      /* -1=non teste, 0=HS, 1=OK (puce passe en TX) */
 static uint8_t s_partnum = 0xFF;    /* CC1101 attendu : PARTNUM 0x00, VERSION 0x04/0x14 */
@@ -279,18 +285,22 @@ int cc1101_tx_raw_bits(const char *bits, int n, int repeats) {
     strobe(CC_STX);
     esp_rom_delay_us(800);   /* laisse le PLL se caler + la PA monter avant de moduler */
     g_tx_marc = cc1101_read_reg(CC_MARCSTATE | 0x40) & 0x1F;
+    /* Timing derive du TE reglable : bit '1'=TE haut/2TE bas, '0'=2TE haut/TE bas,
+     * preambule=TE, entete proportionnelle a TE (= HEADER a TE nominal). */
+    const uint32_t te = s_tx_te, te2 = 2 * s_tx_te;
+    const uint32_t hdr = (uint32_t)((uint64_t)PROFALUX_HEADER_US * s_tx_te / PROFALUX_TE_US);
     for (int r = 0; r < repeats; r++) {
         for (int i = 0; i < PROFALUX_PREAMBLE_ELEMENTS; i++) {
             gpio_set_level(CC1101_PIN_GDO0, (i & 1) == 0);
-            esp_rom_delay_us(PROFALUX_TE_US);
+            esp_rom_delay_us(te);
         }
         gpio_set_level(CC1101_PIN_GDO0, 0);
-        esp_rom_delay_us(PROFALUX_HEADER_US);
+        esp_rom_delay_us(hdr);
         for (int i = 0; i < n; i++) {
-            if (bits[i] == '1') { gpio_set_level(CC1101_PIN_GDO0, 1); esp_rom_delay_us(455);
-                                  gpio_set_level(CC1101_PIN_GDO0, 0); esp_rom_delay_us(910); }
-            else                { gpio_set_level(CC1101_PIN_GDO0, 1); esp_rom_delay_us(910);
-                                  gpio_set_level(CC1101_PIN_GDO0, 0); esp_rom_delay_us(455); }
+            if (bits[i] == '1') { gpio_set_level(CC1101_PIN_GDO0, 1); esp_rom_delay_us(te);
+                                  gpio_set_level(CC1101_PIN_GDO0, 0); esp_rom_delay_us(te2); }
+            else                { gpio_set_level(CC1101_PIN_GDO0, 1); esp_rom_delay_us(te2);
+                                  gpio_set_level(CC1101_PIN_GDO0, 0); esp_rom_delay_us(te); }
         }
         gpio_set_level(CC1101_PIN_GDO0, 0);
         esp_rom_delay_us(2000);   /* gap inter-trame */

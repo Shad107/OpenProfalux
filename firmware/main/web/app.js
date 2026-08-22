@@ -360,6 +360,7 @@ async function loadConfig() {
   $('#sys-device').value = c.device || ''; $('#sys-logframes').checked = !!c.log_frames;
   if ($('#sys-debug')) $('#sys-debug').checked = !!c.debug;
   if ($('#sys-rxgain')) $('#sys-rxgain').value = c.rx_gain || 39;
+  if ($('#sys-txte')) $('#sys-txte').value = c.tx_te || 455;
   if ($('#mqtt-device')) $('#mqtt-device').value = c.device || '';
   const st = await api('/api/ota/status').catch(() => ({}));
   $('#ota-version').textContent = st.version || '…';
@@ -381,7 +382,7 @@ $('#mqtt-save').onclick = async () => {
   toast('MQTT enregistré, redémarrage…');
 };
 $('#sys-save').onclick = async () => {
-  const b = { device: $('#sys-device').value.trim(), log_frames: $('#sys-logframes').checked, debug: $('#sys-debug').checked, rx_gain: Number($('#sys-rxgain').value), reboot: $('#sys-reboot').checked };
+  const b = { device: $('#sys-device').value.trim(), log_frames: $('#sys-logframes').checked, debug: $('#sys-debug').checked, rx_gain: Number($('#sys-rxgain').value), tx_te: Number($('#sys-txte').value) || 455, reboot: $('#sys-reboot').checked };
   await api('/api/config', { method: 'POST', body: JSON.stringify(b) }).catch(() => {});
   b.reboot ? toast('Enregistré, redémarrage…') : savedBtn($('#sys-save'), 'Enregistrer');
 };

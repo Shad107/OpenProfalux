@@ -229,6 +229,7 @@ static void cfg_get(nvs_handle_t h, const char *k, char *out, size_t cap) {
 static esp_err_t h_config_get(httpd_req_t *r) {
     char dev[32] = "", ssid[33] = "", uri[160] = "", user[128] = "", pass[256] = "";
     uint8_t logf = 0, dbg = 0, rg = 0x27;
+    uint32_t txte = 455;
     nvs_handle_t h;
     if (nvs_open("cfg", NVS_READONLY, &h) == ESP_OK) {
         cfg_get(h, "device", dev, sizeof(dev)); cfg_get(h, "wifi_ssid", ssid, sizeof(ssid));
@@ -237,13 +238,14 @@ static esp_err_t h_config_get(httpd_req_t *r) {
         nvs_get_u8(h, "log_frames", &logf);
         nvs_get_u8(h, "debug", &dbg);
         uint8_t tmp; if (nvs_get_u8(h, "rx_gain", &tmp) == ESP_OK && tmp) rg = tmp;
+        uint32_t t; if (nvs_get_u32(h, "tx_te", &t) == ESP_OK && t) txte = t;
         nvs_close(h);
     }
     char out[512];
     snprintf(out, sizeof(out),
              "{\"device\":\"%s\",\"wifi_ssid\":\"%s\",\"mqtt_uri\":\"%s\",\"mqtt_user\":\"%s\","
-             "\"mqtt_user_len\":%d,\"mqtt_pass_len\":%d,\"log_frames\":%d,\"debug\":%d,\"rx_gain\":%d}",
-             dev, ssid, uri, user, (int)strlen(user), (int)strlen(pass), logf ? 1 : 0, dbg ? 1 : 0, rg);
+             "\"mqtt_user_len\":%d,\"mqtt_pass_len\":%d,\"log_frames\":%d,\"debug\":%d,\"rx_gain\":%d,\"tx_te\":%u}",
+             dev, ssid, uri, user, (int)strlen(user), (int)strlen(pass), logf ? 1 : 0, dbg ? 1 : 0, rg, (unsigned)txte);
     memset(pass, 0, sizeof(pass));   /* on n'oublie pas d'effacer le mdp de la pile */
     httpd_resp_set_type(r, "application/json");
     httpd_resp_sendstr(r, out);
@@ -280,6 +282,12 @@ static esp_err_t h_config_post(httpd_req_t *r) {
             uint8_t rg = (uint8_t)rgj->valuedouble;   /* AGCCTRL2 : plafond de gain RX */
             nvs_set_u8(h, "rx_gain", rg);
             cc1101_set_rx_gain(rg);    /* pris en compte a la prochaine fenetre d'ecoute */
+        }
+        cJSON *tj = cJSON_GetObjectItem(j, "tx_te");
+        if (cJSON_IsNumber(tj)) {
+            uint32_t te = (uint32_t)tj->valuedouble;  /* TE d'emission (us) */
+            nvs_set_u32(h, "tx_te", te);
+            cc1101_set_tx_te(te);      /* pris en compte a la prochaine emission */
         }
         nvs_commit(h); nvs_close(h);
     }

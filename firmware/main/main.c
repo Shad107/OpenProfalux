@@ -32,6 +32,7 @@ static const char *TAG = "main";
 static bool s_log_frames = false;   /* option UI "capture toutes les trames" (namespace cfg) */
 static bool s_debug      = false;   /* switch UI "debug console" : logge chaque capture RX */
 static uint8_t s_rx_gain = 0x27;    /* plafond de gain RX (AGCCTRL2) reglable via l'UI ; defaut 0x27 */
+static uint32_t s_tx_te  = 455;     /* TE d'emission (us) reglable via l'UI ; defaut 455 (Profalux) */
 
 /* Device name / config from NVS */
 static char s_device_name[32] = "volet_test";
@@ -55,6 +56,7 @@ static void load_config(void) {
     uint8_t lf = 0; nvs_get_u8(h, "log_frames", &lf); s_log_frames = lf;
     uint8_t db = 0; nvs_get_u8(h, "debug", &db); s_debug = db;
     uint8_t rg = 0; if (nvs_get_u8(h, "rx_gain", &rg) == ESP_OK && rg) s_rx_gain = rg;
+    uint32_t te = 0; if (nvs_get_u32(h, "tx_te", &te) == ESP_OK && te) s_tx_te = te;
     nvs_close(h);
     /* Nom d'appareil vide -> defaut : sinon client_id MQTT vide + topic de disponibilite
      * qui ne coincide pas avec la decouverte HA. */
@@ -120,6 +122,7 @@ void app_main(void) {
     if (s_log_frames) shutters_set_log_frames(true);
     cc1101_set_rx_debug(s_debug);   /* switch DEBUG console restaure au boot */
     cc1101_set_rx_gain(s_rx_gain);  /* plafond de gain RX restaure au boot */
+    cc1101_set_tx_te(s_tx_te);      /* TE d'emission restaure au boot */
 
     /* 5. Wi-Fi */
     wifi_bridge_init();
