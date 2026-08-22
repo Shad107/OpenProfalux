@@ -363,7 +363,10 @@ async function loadConfig() {
   if ($('#mqtt-device')) $('#mqtt-device').value = c.device || '';
   const st = await api('/api/ota/status').catch(() => ({}));
   $('#ota-version').textContent = st.version || '…';
+  if ($('#version')) $('#version').textContent = st.version ? 'v' + st.version : '…';
 }
+/* version du header, des le chargement (pas seulement a l'ouverture de Systeme) */
+(async () => { try { const s = await api('/api/ota/status'); if (s && s.version && $('#version')) $('#version').textContent = 'v' + s.version; } catch (e) {} })();
 $('#wifi-save').onclick = async () => {
   const b = { wifi_ssid: $('#wifi-ssid').value.trim(), reboot: $('#wifi-reboot').checked };
   if ($('#wifi-pass').value) b.wifi_pass = $('#wifi-pass').value;

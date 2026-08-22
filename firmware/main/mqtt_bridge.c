@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <mqtt_client.h>
 #include <esp_log.h>
+#include <esp_app_desc.h>
 #include <cJSON.h>
 
 static const char *TAG = "mqtt";
@@ -132,8 +133,8 @@ int mqtt_pub_system_status(void) {
     if (!s_mqtt) return -1;
     char payload[256];
     snprintf(payload, sizeof(payload),
-             "{\"fw\":\"0.1.0-alpha\",\"target\":\"" TARGET_NAME "\",\"free_heap\":%u}",
-             (unsigned)esp_get_free_heap_size());
+             "{\"fw\":\"%s\",\"target\":\"" TARGET_NAME "\",\"free_heap\":%u}",
+             esp_app_get_description()->version, (unsigned)esp_get_free_heap_size());
     return esp_mqtt_client_publish(s_mqtt, TOPIC_BASE "/system/status", payload, 0, 1, 1);
 }
 
