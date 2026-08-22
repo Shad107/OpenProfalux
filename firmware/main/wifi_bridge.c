@@ -6,14 +6,36 @@
 #include <esp_log.h>
 #include <esp_mac.h>
 #include <esp_sntp.h>
+#include <esp_system.h>
 #include <time.h>
 #include <stdlib.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <freertos/event_groups.h>
 
 static const char *TAG = "wifi";
 static EventGroupHandle_t s_wifi_events;
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
+
+/* Watchdog WiFi : si la STA reste coupee, relance la pile toute seule (plus besoin de
+ * debrancher). Demarre APRES la 1re connexion (pas en mode SoftAP-config). */
+static TaskHandle_t s_wdt = NULL;
+static void wifi_watchdog_task(void *arg) {
+    (void)arg; int down_s = 0;
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(10000));
+        if (wifi_bridge_is_connected()) { down_s = 0; continue; }
+        down_s += 10;
+        if (down_s == 120) {   /* 2 min coupe -> relance propre de la pile (re-declenche STA_START->connect) */
+            ESP_LOGW(TAG, "WiFi coupe depuis 2 min -> restart pile WiFi");
+            esp_wifi_stop(); vTaskDelay(pdMS_TO_TICKS(500)); esp_wifi_start();
+        } else if (down_s >= 300) {   /* 5 min -> reboot en DERNIER recours (recupere tout) */
+            ESP_LOGE(TAG, "WiFi coupe depuis 5 min -> reboot de recuperation");
+            esp_restart();
+        }
+    }
+}
 
 static void wifi_event_cb(void *arg, esp_event_base_t base, int32_t id, void *data) {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
@@ -23,6 +45,7 @@ static void wifi_event_cb(void *arg, esp_event_base_t base, int32_t id, void *da
         esp_wifi_connect();
         xEventGroupClearBits(s_wifi_events, WIFI_CONNECTED_BIT);
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        if (!s_wdt) xTaskCreate(wifi_watchdog_task, "wifi_wdt", 3072, NULL, 4, &s_wdt);   /* arme le watchdog a la 1re connexion */
         ip_event_got_ip_t *evt = (ip_event_got_ip_t *)data;
         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&evt->ip_info.ip));
         xEventGroupSetBits(s_wifi_events, WIFI_CONNECTED_BIT);

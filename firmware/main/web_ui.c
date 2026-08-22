@@ -505,12 +505,15 @@ static esp_err_t h_diag_tx(httpd_req_t *r) {   /* re-lance le self-test TX a la 
 
 static void reg(httpd_handle_t s, const char *uri, httpd_method_t m, esp_err_t (*h)(httpd_req_t *)) {
     httpd_uri_t u = { .uri = uri, .method = m, .handler = h };
-    httpd_register_uri_handler(s, &u);
+    esp_err_t e = httpd_register_uri_handler(s, &u);
+    if (e != ESP_OK) ESP_LOGE(TAG, "route NON enregistree: %s (%s) -> augmenter max_uri_handlers", uri, esp_err_to_name(e));
 }
 
 void web_ui_start(void) {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.max_uri_handlers = 28;   /* > nb d'endpoints reels (sinon "no slots left" -> /api/... non enregistres) */
+    cfg.max_uri_handlers = 48;   /* LARGE marge > nb de routes reg() (30+). Si trop bas, les dernieres
+                                    routes echouent EN SILENCE (ex /api/restore mort a 28). reg() loggue
+                                    desormais les echecs pour ne plus jamais rater ca. */
     cfg.stack_size = 6144;   /* esp_ota_end() consomme la pile en fin d'upload */
     /* ROOT CAUSE "web UI morte au bout d'un moment" : sans lru_purge, une fois les
      * max_open_sockets pris (SPA qui poll en keep-alive), le httpd REFUSE toute nouvelle
