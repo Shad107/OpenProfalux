@@ -46,6 +46,7 @@ void cc1101_set_rx_gain(uint8_t agcctrl2);   /* plafond de gain RX (AGCCTRL2) re
 uint8_t cc1101_get_rx_gain(void);
 void cc1101_set_tx_te(uint32_t te_us);       /* TE d'emission (us) reglable ; defaut 455 (Profalux) */
 uint32_t cc1101_get_tx_te(void);
+int cc1101_last_te(void);                    /* TE (us) mesure sur la derniere trame decodee */
 void cc1101_get_diag(int *tx_ok, uint8_t *partnum, uint8_t *version); /* diag UI : puce + self-test TX */
 uint8_t cc1101_read_reg(uint8_t addr);
 void   cc1101_write_reg(uint8_t addr, uint8_t val);

@@ -39,6 +39,10 @@ uint8_t cc1101_get_rx_gain(void)   { return s_rx_gain; }
 static volatile uint32_t s_tx_te = PROFALUX_TE_US;
 void cc1101_set_tx_te(uint32_t te) { if (te >= 200 && te <= 900) { s_tx_te = te; ESP_LOGW(TAG, "TX TE=%u us", (unsigned)te); } }
 uint32_t cc1101_get_tx_te(void)    { return s_tx_te; }
+/* TE (us) mesure sur la DERNIERE trame decodee (moyenne des HAUT courts). Sert a auto-caler
+ * le TE d'emission a l'apprentissage (le rejeu matche le tempo de la telecommande captee). */
+static volatile int s_last_te = 455;
+int cc1101_last_te(void) { return s_last_te; }
 /* Diagnostic radio expose a l'UI : detection de la puce + resultat du self-test TX. */
 static int     s_tx_ok   = -1;      /* -1=non teste, 0=HS, 1=OK (puce passe en TX) */
 static uint8_t s_partnum = 0xFF;    /* CC1101 attendu : PARTNUM 0x00, VERSION 0x04/0x14 */
@@ -334,22 +338,24 @@ int cc1101_capture_init(void) {
  * Retourne le nombre de bits decodes (<0 = erreur). bit=1 si HAUT court (H<680us). */
 /* Decode les bits a partir d'UNE entete candidate (index hdr, LOW long). Retourne nb bits. */
 static int decode_from_header(const rmt_symbol_word_t *sym, size_t n, int hdr, int hdr_in_dur0,
-                              char *out, int max_bits) {
-    int nb = 0;
+                              char *out, int max_bits, int *out_te) {
+    int nb = 0; uint32_t sum_short = 0; int cnt_short = 0;   /* pour mesurer le TE (HAUT court = bit '1') */
     /* Correctif off-by-one : si l'entete (LOW long) est dans duration0, alors le HIGH
      * du PREMIER bit de data est deja dans duration1 du MEME symbole. Sans ca la trame
      * est decalee (serial = attendu>>1) et le rejeu est invalide. On l'emet ici. */
     if (hdr_in_dur0 && sym[hdr].level1 && sym[hdr].duration1 >= 200 && sym[hdr].duration1 <= 1300) {
-        out[nb++] = (sym[hdr].duration1 < 680) ? '1' : '0';
+        if (sym[hdr].duration1 < 680) { out[nb++] = '1'; sum_short += sym[hdr].duration1; cnt_short++; }
+        else out[nb++] = '0';
     }
     for (size_t i = hdr + 1; i < n && nb < max_bits && nb < 66; i++) {
         uint32_t hi = sym[i].level0 ? sym[i].duration0 : sym[i].duration1;
         uint32_t lo = sym[i].level0 ? sym[i].duration1 : sym[i].duration0;
         if (hi < 200 || hi > 1300) break;
-        out[nb++] = (hi < 680) ? '1' : '0';
+        if (hi < 680) { out[nb++] = '1'; sum_short += hi; cnt_short++; } else out[nb++] = '0';
         if (lo > 2000) break;
     }
     out[nb] = 0;
+    if (out_te && cnt_short) *out_te = (int)(sum_short / cnt_short);   /* TE ≈ moyenne des HAUT courts */
     return nb;
 }
 
@@ -367,8 +373,9 @@ static int decode_rmt(const rmt_symbol_word_t *sym, size_t n, char *out, int max
         if      (!sym[i].level0 && sym[i].duration0 > 3500) { hdr = (int)i; in0 = 1; }
         else if (!sym[i].level1 && sym[i].duration1 > 3500) { hdr = (int)i; in0 = 0; }
         if (hdr < 0) continue;
-        int nb = decode_from_header(sym, n, hdr, in0, tmp, tmpcap);
-        if (nb > best) { best = nb; memcpy(out, tmp, (size_t)nb + 1); }   /* garde la meilleure */
+        int te = 0;
+        int nb = decode_from_header(sym, n, hdr, in0, tmp, tmpcap, &te);
+        if (nb > best) { best = nb; memcpy(out, tmp, (size_t)nb + 1); if (te) s_last_te = te; }   /* garde la meilleure + son TE */
         if (best >= 64) break;                                            /* trame complete : stop */
     }
     if (best < 0) { out[0] = 0; return -4; }

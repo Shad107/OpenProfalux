@@ -154,6 +154,15 @@ static esp_err_t h_learn_assign(httpd_req_t *r) {
     if (!j) return httpd_resp_send_err(r, 400, "json");
     int rc = shutters_learn_assign(jstr(j, "id"), jstr(j, "action"), jstr(j, "bits"));
     cJSON_Delete(j); s_lready = false;
+    if (rc == 0) {   /* AUTO : cale le TE d'emission sur le tempo de la trame captee (le champ UI reste un override) */
+        int te = cc1101_last_te();
+        if (te >= 350 && te <= 550) {   /* TE plausible d'une telecommande PFX (Profalux 455, FranciaFlex ~415) */
+            cc1101_set_tx_te((uint32_t)te);
+            nvs_handle_t h;
+            if (nvs_open("cfg", NVS_READWRITE, &h) == ESP_OK) { nvs_set_u32(h, "tx_te", (uint32_t)te); nvs_commit(h); nvs_close(h); }
+            ESP_LOGI(TAG, "TE d'emission auto-cale a %d us (mesure sur la trame captee)", te);
+        }
+    }
     httpd_resp_sendstr(r, rc == 0 ? "{\"ok\":1}" : "{\"ok\":0}");
     return ESP_OK;
 }
