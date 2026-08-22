@@ -405,7 +405,19 @@ static void load_cfg(void) {
 /* Emet une RAFALE = 1 appui de telecommande, en UNE session TX (trames dos-a-dos, une seule
  * calibration) via l'arbitre radio. Le moteur part ensuite tout seul jusqu'au STOP/butee. */
 static void emit_press(const char *bits) {
-    if (bits && bits[0]) radio_tx(bits, PRESS_REPEATS);
+    if (!bits || !bits[0]) return;
+    /* Log de CE QU'ON EMET (serial/bouton/hop decodes de la trame), symetrique du log RX.
+     * Permet de verifier qu'on rejoue bien la trame captee (et de voir le hop emis). */
+    int n = (int)strlen(bits);
+    if (n >= 64) {
+        uint32_t hop = 0, ser = 0; uint8_t btn = 0;
+        for (int i = 0; i < 32; i++) if (bits[i]      == '1') hop |= (1u << i);
+        for (int i = 0; i < 28; i++) if (bits[32 + i] == '1') ser |= (1u << i);
+        for (int i = 0; i < 4;  i++) if (bits[60 + i] == '1') btn |= (1u << i);
+        ESP_LOGW(TAG, "TX serial=0x%07X bouton=0x%X hop=0x%08X (%d bits, rafale x%d)",
+                 (unsigned)ser, btn, (unsigned)hop, n, PRESS_REPEATS);
+    }
+    radio_tx(bits, PRESS_REPEATS);
 }
 /* Rejoue TELLE QUELLE une trame captee (identifiee par serial+hop dans l'anneau RF).
  * Sert au bouton "rejouer" du debug RF : on renvoie la trame brute, sans passer par un volet. */
