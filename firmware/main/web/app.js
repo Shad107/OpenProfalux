@@ -435,15 +435,26 @@ $('#mqtt-detect').onclick = async () => {
 /* ── OTA ── */
 $('#ota-btn').onclick = async () => {
   const f = $('#ota-file').files[0]; if (!f) return alert('Choisis un fichier .bin');
-  $('#ota-prog').hidden = false; $('#ota-btn').disabled = true;
+  if (/full/i.test(f.name) && !confirm(`« ${f.name} » ressemble à un binaire COMPLET (flash série à 0x0), pas à une image OTA — l'OTA le refusera. Prends plutôt le fichier « -ota.bin ». Continuer quand même ?`)) return;
+  $('#ota-prog').hidden = false; $('#ota-btn').disabled = true; $('#ota-bar').value = 0;
+  /* Le httpd de l'ESP est mono-tache : pendant l'upload il ne peut PAS repondre a /api/ota/status.
+     On pilote donc la barre cote navigateur (octets reellement pousses vers l'ESP) via XHR. */
   const buf = await f.arrayBuffer();
-  const up = fetch('/api/ota/upload', { method: 'POST', body: buf });
-  const poll = setInterval(async () => {
-    const s = await api('/api/ota/status').catch(() => null);
-    if (s) { $('#ota-bar').value = s.total ? Math.round(100 * s.written / s.total) : 0; $('#ota-msg').textContent = s.msg || ''; }
-    if (s && (s.state === 4 || s.state === 99)) clearInterval(poll);
-  }, 800);
-  up.catch(() => {});
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/ota/upload');
+  xhr.upload.onprogress = (e) => {
+    if (!e.lengthComputable) return;
+    $('#ota-bar').value = Math.round(100 * e.loaded / e.total);
+    $('#ota-msg').textContent = `envoi ${Math.round(e.loaded / 1024)} / ${Math.round(e.total / 1024)} Ko`;
+  };
+  xhr.onload = () => {
+    const ok = xhr.status >= 200 && xhr.status < 300;
+    $('#ota-bar').value = ok ? 100 : $('#ota-bar').value;
+    $('#ota-msg').textContent = ok ? '✓ reçu — vérification + redémarrage (~5 s)…' : `✗ échec (HTTP ${xhr.status})`;
+    if (!ok) $('#ota-btn').disabled = false;
+  };
+  xhr.onerror = () => { $('#ota-msg').textContent = '✗ échec de l\'envoi (lien coupé ?)'; $('#ota-btn').disabled = false; };
+  xhr.send(buf);
 };
 $('#ota-rollback').onclick = async () => {
   if (!confirm('Revenir à la version précédente et redémarrer ?')) return;
@@ -454,15 +465,21 @@ let githubUrl = null;
 $('#ota-check').onclick = async () => {
   const span = $('#ota-latest'); span.textContent = '⏳ Interrogation de GitHub…'; $('#ota-github').hidden = true;
   try {
+    /* variante de CETTE carte -> nom d'asset attendu (jamais le -full.bin, invalide en OTA) */
+    const stt = await api('/api/ota/status').catch(() => ({}));
+    const variant = stt.target === 'm5stack_atom' ? 'atom' : (stt.target === 'external' ? 'devkit' : null);
     const r = await fetch('https://api.github.com/repos/Shad107/OpenProfalux/releases/latest');
     if (!r.ok) { span.textContent = r.status === 404 ? '❌ Aucune release publique (dépôt privé ?)' : `❌ HTTP ${r.status}`; return; }
     const j = await r.json();
-    const latest = j.tag_name || j.name || '?';
-    const cur = $('#ota-version').textContent;
-    githubUrl = (j.assets || []).map(a => a.browser_download_url).find(u => /openprofalux\.bin$/.test(u));
+    const latest = (j.tag_name || j.name || '?').replace(/^v/, '');   /* "v0.1.1" -> "0.1.1" */
+    const cur = ($('#ota-version').textContent || '').replace(/^v/, '');
+    githubUrl = variant
+      ? (j.assets || []).map(a => a.browser_download_url).find(u => u.endsWith(`openprofalux-${variant}-ota.bin`))
+      : null;
     if (githubUrl) $('#ota-github').hidden = false;
     span.textContent = (cur && cur === latest) ? `✅ ${cur} = dernière version`
-      : `⚠️ Installée ${cur}, disponible ${latest}${githubUrl ? '' : ' (pas d’asset .bin)'}`;
+      : !variant ? `⚠️ Disponible ${latest} — variante inconnue, utilise le flash manuel`
+      : `⚠️ Installée ${cur}, disponible ${latest}${githubUrl ? '' : ' (pas d’asset OTA pour cette variante)'}`;
   } catch { span.textContent = '❌ Pas d’accès Internet ?'; }
 };
 $('#ota-github').onclick = async () => {

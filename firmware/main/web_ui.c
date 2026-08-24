@@ -5,6 +5,7 @@
 #include "shutters.h"
 #include "radio.h"
 #include "ota.h"
+#include "hardware_config.h"   /* TARGET_NAME (expose la variante a l'UI OTA) */
 #include <string.h>
 #include <stdlib.h>
 #include "esp_log.h"
@@ -420,8 +421,8 @@ static esp_err_t h_mqtt_discover(httpd_req_t *r) {
 /* ── /api/ota/status + /api/ota/upload ── */
 static esp_err_t h_ota_status(httpd_req_t *r) {
     ota_status_t st; ota_get_status(&st);
-    char out[256];
-    snprintf(out, sizeof(out), "{\"state\":%d,\"total\":%u,\"written\":%u,\"msg\":\"%s\",\"version\":\"%s\"}",
+    char out[384];   /* message[128] + version[64] + target + scaffolding JSON */
+    snprintf(out, sizeof(out), "{\"state\":%d,\"total\":%u,\"written\":%u,\"msg\":\"%s\",\"version\":\"%s\",\"target\":\"" TARGET_NAME "\"}",
              st.state, (unsigned)st.total_bytes, (unsigned)st.written_bytes, st.message, st.active_version);
     httpd_resp_set_type(r, "application/json");
     httpd_resp_sendstr(r, out);
