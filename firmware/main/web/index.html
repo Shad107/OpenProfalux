@@ -44,6 +44,7 @@
       <nav class="subtabs">
         <button class="subtab active" data-s="learn">Apprentissage</button>
         <button class="subtab" data-s="calib">Calibration</button>
+        <button class="subtab" data-s="enrol">Enrôlement (exp.)</button>
       </nav>
 
       <div class="subpanel active" data-sp="learn">
@@ -84,6 +85,26 @@
             <div class="row"><input id="cal-up-manual" type="number" step="0.1" min="0" placeholder="Montée (s)" style="flex:1;min-width:0">
             <input id="cal-down-manual" type="number" step="0.1" min="0" placeholder="Descente (s)" style="flex:1;min-width:0"></div></div>
           <div class="row end" style="margin-top:15px"><button id="cal-save" class="btn primary" disabled>Enregistrer la calibration</button></div>
+        </div>
+      </div>
+
+      <div class="subpanel" data-sp="enrol">
+        <div class="card">
+          <div class="statline bad"><span class="dot"></span><b>Expérimental.</b> Crée une identité virtuelle et l'enrôle directement sur le moteur, sans télécommande d'origine. Non garanti selon le modèle de moteur. Le clonage (onglet <b>Apprentissage</b>) reste la voie sûre.</div>
+          <h2>Enrôlement sans télécommande</h2>
+          <p class="sub">Choisis ton modèle de moteur (comme l'appli d'origine), génère une identité virtuelle, puis suis les gestes pour l'apprendre au moteur.</p>
+          <div class="field"><label>Modèle de moteur</label><select id="pfx-model"></select></div>
+          <div class="row"><button id="pfx-new" class="btn primary">Générer une identité virtuelle</button></div>
+          <div class="statline" id="pfx-ident" hidden><span class="dot"></span><b></b></div>
+          <div id="pfx-steps" hidden>
+            <h3>1. Enrôler l'identité sur le moteur</h3>
+            <ol class="steps" id="pfx-gestures"></ol>
+            <div class="row"><button id="pfx-learn" class="btn primary">📡 Émettre la trame d'apprentissage</button></div>
+            <h3>2. Tester la nouvelle identité</h3>
+            <p class="sub">Si le moteur a bien appris, ces boutons doivent le piloter.</p>
+            <div class="dpad enrol-pad"><button id="pfx-up">▲</button><button id="pfx-stop">■</button><button id="pfx-down">▼</button></div>
+            <div class="row" style="margin-top:12px"><button id="pfx-forget" class="btn danger">🗑 Oublier cette identité</button></div>
+          </div>
         </div>
       </div>
     </section>

@@ -175,3 +175,6 @@ progress::-webkit-progress-value{background:var(--accent)}
 .hops code{background:var(--surface-2);padding:1px 4px;border-radius:4px}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* Enrôlement (exp.) : pad de test compact */
+.enrol-pad{max-width:340px}

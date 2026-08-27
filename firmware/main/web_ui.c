@@ -3,6 +3,7 @@
  */
 #include "web_ui.h"
 #include "shutters.h"
+#include "pfx_enrol.h"
 #include "radio.h"
 #include "ota.h"
 #include "hardware_config.h"   /* TARGET_NAME (expose la variante a l'UI OTA) */
@@ -513,6 +514,56 @@ static esp_err_t h_diag_tx(httpd_req_t *r) {   /* re-lance le self-test TX a la 
     return httpd_resp_sendstr(r, out);
 }
 
+/* ── /api/pfx : enrôlement d'une identité virtuelle 0x067 (expérimental, sans télécommande) ── */
+static esp_err_t h_pfx_get(httpd_req_t *r) {
+    pfx_ident_t id; bool active = pfx_enrol_get(&id);
+    char out[720]; int p = 0;
+    p += snprintf(out + p, sizeof(out) - p,
+                  "{\"active\":%d,\"model\":%d,\"serial\":\"0x%07X\",\"idx\":%d,\"counter\":%d,\"models\":[",
+                  active ? 1 : 0, id.model, (unsigned)id.serial, id.idx, id.counter);
+    int nm = pfx_enrol_model_count();
+    for (int i = 0; i < nm; i++) {
+        const pfx_model_t *m = pfx_enrol_model(i);
+        p += snprintf(out + p, sizeof(out) - p, "%s{\"name\":\"%s\",\"te\":%d,\"routine\":\"%s\"}",
+                      i ? "," : "", m->name, m->te_us, m->routine);
+    }
+    snprintf(out + p, sizeof(out) - p, "]}");
+    httpd_resp_set_type(r, "application/json");
+    return httpd_resp_sendstr(r, out);
+}
+static esp_err_t h_pfx_new(httpd_req_t *r) {
+    char *body = read_body(r); if (!body) return httpd_resp_send_err(r, 400, "body");
+    cJSON *j = cJSON_Parse(body); free(body);
+    if (!j) return httpd_resp_send_err(r, 400, "json");
+    cJSON *mo = cJSON_GetObjectItem(j, "model");
+    int model = cJSON_IsNumber(mo) ? (int)mo->valuedouble : -1;
+    cJSON_Delete(j);
+    int idx = pfx_enrol_new_identity(model);
+    char out[48];
+    snprintf(out, sizeof(out), "{\"ok\":%d,\"idx\":%d}", idx >= 0 ? 1 : 0, idx);
+    httpd_resp_set_type(r, "application/json");
+    return httpd_resp_sendstr(r, out);
+}
+static esp_err_t h_pfx_learn(httpd_req_t *r) {
+    int rc = pfx_enrol_emit_learn();
+    httpd_resp_set_type(r, "application/json");
+    return httpd_resp_sendstr(r, rc == 0 ? "{\"ok\":1}" : "{\"ok\":0}");
+}
+static esp_err_t h_pfx_cmd(httpd_req_t *r) {
+    char *body = read_body(r); if (!body) return httpd_resp_send_err(r, 400, "body");
+    cJSON *j = cJSON_Parse(body); free(body);
+    if (!j) return httpd_resp_send_err(r, 400, "json");
+    int rc = pfx_enrol_cmd(jstr(j, "cmd"));
+    cJSON_Delete(j);
+    httpd_resp_set_type(r, "application/json");
+    return httpd_resp_sendstr(r, rc == 0 ? "{\"ok\":1}" : "{\"ok\":0}");
+}
+static esp_err_t h_pfx_forget(httpd_req_t *r) {
+    pfx_enrol_forget();
+    httpd_resp_set_type(r, "application/json");
+    return httpd_resp_sendstr(r, "{\"ok\":1}");
+}
+
 static void reg(httpd_handle_t s, const char *uri, httpd_method_t m, esp_err_t (*h)(httpd_req_t *)) {
     httpd_uri_t u = { .uri = uri, .method = m, .handler = h };
     esp_err_t e = httpd_register_uri_handler(s, &u);
@@ -564,5 +615,10 @@ void web_ui_start(void) {
     reg(s, "/api/backup",       HTTP_GET,  h_backup);
     reg(s, "/api/restore",      HTTP_POST, h_restore);
     reg(s, "/api/mqtt/discover", HTTP_GET, h_mqtt_discover);
+    reg(s, "/api/pfx",        HTTP_GET,  h_pfx_get);
+    reg(s, "/api/pfx/new",    HTTP_POST, h_pfx_new);
+    reg(s, "/api/pfx/learn",  HTTP_POST, h_pfx_learn);
+    reg(s, "/api/pfx/cmd",    HTTP_POST, h_pfx_cmd);
+    reg(s, "/api/pfx/forget", HTTP_POST, h_pfx_forget);
     ESP_LOGI(TAG, "HTTP UI demarree");
 }

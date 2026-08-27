@@ -41,6 +41,7 @@ function applyRoute() {
   if (typeof loadStatus === 'function') loadStatus();   /* refresh immediat a chaque changement d'onglet (ex: RF debug) */
   if (sub === 'rf') { if (typeof loadRf === 'function') loadRf(true); if (typeof loadFrames === 'function') loadFrames(); }
   if (sub === 'calib' && !calibLive && typeof fillCalib === 'function') fillCalib();   /* affiche les temps enregistres */
+  if (sub === 'enrol' && typeof loadPfx === 'function') loadPfx();
 }
 /* Rafraichit la 1re page quand l'onglet RF est actif ET qu'on n'a pas defile (sinon on garde la position). */
 setInterval(() => { if ((location.hash || '').includes('/rf') && typeof loadRf === 'function' && rfOffset <= RF_PAGE) loadRf(true); }, 5000);
@@ -348,6 +349,77 @@ $('#cal-up-start').onclick   = () => { chrono('up'); api('/api/shutter', { metho
 $('#cal-up-stop').onclick    = () => { chronoStop('up'); api('/api/shutter', { method:'POST', body: JSON.stringify({ id: calId(), cmd:'stop' }) }); };
 $('#cal-save').onclick = () => { api('/api/calibrate', { method: 'POST',
   body: JSON.stringify({ id: calId(), travel_up_ms: calT.up, travel_down_ms: calT.down }) }); calibLive = false; toast('Calibration enregistrée'); };
+
+/* ── Enrôlement d'une identité virtuelle 0x067 (expérimental, sans télécommande) ── */
+const PFX_GESTURES = {
+  R6: [
+    'Mets le volet en position avec ~4 lames apparentes.',
+    'Clique « Émettre la trame d\'apprentissage » ci-dessous (rafale ~1 s).',
+    'Dans la minute : si tu as encore une télécommande d\'origine, fais montée → descente ~4 lames → stop → remontée.',
+    'Moteur vierge (jamais appairé) : coupe puis remets le courant du moteur, et émets la trame dans la minute qui suit la remise sous tension.',
+    'Le volet fait un va-et-vient = enrôlement réussi. Teste alors ▲ ■ ▼ ci-dessous.',
+  ],
+  R7: [
+    'Mets le volet en position avec ~4 lames apparentes.',
+    'Clique « Émettre la trame d\'apprentissage » ci-dessous.',
+    'Chorégraphie propre à ce modèle non encore détaillée : tente la procédure ci-dessus (montée → descente 4 lames → stop → remontée) et rapporte le résultat sur GitHub.',
+    'Le volet fait un va-et-vient = enrôlement réussi. Teste alors ▲ ■ ▼.',
+  ],
+  R8: [
+    'Mets le volet en position avec ~4 lames apparentes.',
+    'Clique « Émettre la trame d\'apprentissage » ci-dessous.',
+    'Modèle NeoSol : chorégraphie R8 non encore détaillée. Tente la procédure montée → descente 4 lames → stop → remontée dans la minute, et rapporte le résultat sur GitHub.',
+    'Le volet fait un va-et-vient = enrôlement réussi. Teste alors ▲ ■ ▼.',
+  ],
+};
+let pfxModels = [];
+async function loadPfx() {
+  const d = await api('/api/pfx').catch(() => null);
+  if (!d) return;
+  pfxModels = d.models || [];
+  const sel = $('#pfx-model');
+  if (sel && !sel.dataset.filled && pfxModels.length) {
+    sel.innerHTML = pfxModels.map((m, i) => `<option value="${i}">${esc(m.name)} · TE ${m.te}µs · ${esc(m.routine)}</option>`).join('');
+    sel.dataset.filled = '1';
+  }
+  const box = $('#pfx-ident'), steps = $('#pfx-steps');
+  if (!box) return;
+  if (d.active) {
+    box.hidden = false; steps.hidden = false; box.className = 'statline ok';
+    box.querySelector('b').textContent = `Identité ${d.serial} · slot ${d.idx + 1}/63 · compteur ${d.counter}`;
+    if (sel) sel.value = String(d.model);
+    const ol = $('#pfx-gestures'); const m = pfxModels[d.model];
+    if (ol && m) ol.innerHTML = (PFX_GESTURES[m.routine] || PFX_GESTURES.R6).map(s => `<li>${s}</li>`).join('');
+  } else { box.hidden = true; steps.hidden = true; }
+}
+if ($('#pfx-new')) $('#pfx-new').onclick = async () => {
+  const model = Number($('#pfx-model').value || 0);
+  const r = await api('/api/pfx/new', { method: 'POST', body: JSON.stringify({ model }) }).catch(() => null);
+  toast(r && r.ok ? 'Identité virtuelle générée' : 'Échec de la génération');
+  await loadPfx();
+};
+if ($('#pfx-learn')) $('#pfx-learn').onclick = async () => {
+  const b = $('#pfx-learn'); if (radioBusy) return;
+  setRadioBusy(true); b.disabled = true; const o = b.textContent; b.textContent = '📡 Émission…';
+  try { const r = await api('/api/pfx/learn', { method: 'POST' }); toast(r && r.ok ? 'Trame d\'apprentissage émise' : 'Échec (radio occupée ?)'); }
+  catch (e) { toast('Radio occupée, réessaie dans un instant'); }
+  finally { b.disabled = false; b.textContent = o; setRadioBusy(false); await loadPfx(); }
+};
+async function pfxCmd(cmd, btn) {
+  if (radioBusy) return;
+  setRadioBusy(true); if (btn) btn.classList.add('sending');
+  try { await api('/api/pfx/cmd', { method: 'POST', body: JSON.stringify({ cmd }) }); }
+  catch (e) { toast('Radio occupée, réessaie dans un instant'); }
+  finally { if (btn) btn.classList.remove('sending'); setRadioBusy(false); loadPfx(); }
+}
+if ($('#pfx-up')) $('#pfx-up').onclick = () => pfxCmd('up', $('#pfx-up'));
+if ($('#pfx-stop')) $('#pfx-stop').onclick = () => pfxCmd('stop', $('#pfx-stop'));
+if ($('#pfx-down')) $('#pfx-down').onclick = () => pfxCmd('down', $('#pfx-down'));
+if ($('#pfx-forget')) $('#pfx-forget').onclick = async () => {
+  if (!confirm('Oublier cette identité virtuelle ?')) return;
+  await api('/api/pfx/forget', { method: 'POST' }).catch(() => {});
+  toast('Identité oubliée'); await loadPfx();
+};
 
 /* ── Config : Wi-Fi / MQTT / Système (sauvegardes séparées, partielles) ── */
 async function loadConfig() {

@@ -21,6 +21,7 @@
 #include "wifi_bridge.h"
 #include "mqtt_bridge.h"
 #include "shutters.h"
+#include "pfx_enrol.h"
 #include "web_ui.h"
 #include "ota.h"
 #include <esp_timer.h>
@@ -119,6 +120,7 @@ void app_main(void) {
 
     /* 4c. Modele cover + arbitre radio (RX permanent gere en interne) */
     shutters_init();
+    pfx_enrol_init();   /* identite virtuelle 0x067 (apprentissage sans telecommande, experimental) */
     if (s_log_frames) shutters_set_log_frames(true);
     cc1101_set_rx_debug(s_debug);   /* switch DEBUG console restaure au boot */
     cc1101_set_rx_gain(s_rx_gain);  /* plafond de gain RX restaure au boot */
