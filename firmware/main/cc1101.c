@@ -15,6 +15,7 @@
 #include <freertos/task.h>
 #include <freertos/queue.h>
 #include <esp_rom_sys.h>
+#include "soc/soc_caps.h"   /* SOC_RMT_MEM_WORDS_PER_CHANNEL : portabilite RMT (S3/C3) */
 #include <esp_timer.h>
 #include <driver/rmt_rx.h>
 
@@ -324,7 +325,17 @@ int cc1101_capture_init(void) {
     s_capq = xQueueCreate(2, sizeof(rmt_rx_done_event_data_t));
     rmt_rx_channel_config_t c = {0};
     c.clk_src = RMT_CLK_SRC_DEFAULT; c.resolution_hz = 1000000;
-    c.mem_block_symbols = 512; c.gpio_num = CC1101_PIN_GDO0;
+    /* ESP32 classic : 512 symboles = une trame entiere (~132 symb) tient d'un coup.
+     * Sur S3/C3, 512 depasse la memoire RMT par canal -> rmt_new_rx_channel echoue
+     * (signale par eleroy). On garde 512 sur classic (nos cibles) et on prend le max
+     * du canal sur les autres cibles. On ne fait pas de binaire S3 : c'est pour ceux
+     * qui compilent la source pour un S3/C3. */
+#if defined(CONFIG_IDF_TARGET_ESP32)
+    c.mem_block_symbols = 512;
+#else
+    c.mem_block_symbols = SOC_RMT_MEM_WORDS_PER_CHANNEL;
+#endif
+    c.gpio_num = CC1101_PIN_GDO0;
     if (rmt_new_rx_channel(&c, &s_cap) != ESP_OK) { ESP_LOGW(TAG, "RMT capture init KO"); s_cap = NULL; return -1; }
     rmt_rx_event_callbacks_t cb = { .on_recv_done = cc_cap_cb };
     rmt_rx_register_event_callbacks(s_cap, &cb, s_capq);
