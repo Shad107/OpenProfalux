@@ -24,6 +24,9 @@ int  shutters_delete_volet(const char *id);
 
 /* Apprentissage : affecte une trame captee (bitstring) a une action d'un volet. Cree le volet si absent. */
 int  shutters_learn_assign(const char *id, const char *action, const char *bits);
+/* Cree un volet "virtuel PFX" a partir d'une identite 0x067 enrolee (pilote par generation,
+ * pas rejeu) : apparait dans l'onglet Volets + cover HA. Retourne 0 si OK. */
+int  shutters_create_virtual(const char *id, uint32_t serial, uint16_t counter, uint16_t te);
 int  shutters_reassign(const char *id, const char *from, const char *to);
 
 /* Calibration : temps de course. */

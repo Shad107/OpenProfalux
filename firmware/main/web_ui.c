@@ -563,6 +563,21 @@ static esp_err_t h_pfx_forget(httpd_req_t *r) {
     httpd_resp_set_type(r, "application/json");
     return httpd_resp_sendstr(r, "{\"ok\":1}");
 }
+/* Enregistre l'identite virtuelle enrolee comme volet (onglet Volets + cover HA). */
+static esp_err_t h_pfx_save_volet(httpd_req_t *r) {
+    char *body = read_body(r); if (!body) return httpd_resp_send_err(r, 400, "body");
+    cJSON *j = cJSON_Parse(body); free(body);
+    if (!j) return httpd_resp_send_err(r, 400, "json");
+    const char *name = jstr(j, "id");
+    pfx_ident_t id; bool active = pfx_enrol_get(&id);
+    int rc = -1;
+    if (active && name && *name)
+        rc = shutters_create_virtual(name, id.serial, id.counter, pfx_enrol_model_te(id.model));
+    if (rc == 0) pfx_enrol_forget();   /* l'identite vit desormais dans le volet */
+    cJSON_Delete(j);
+    httpd_resp_set_type(r, "application/json");
+    return httpd_resp_sendstr(r, rc == 0 ? "{\"ok\":1}" : "{\"ok\":0}");
+}
 
 static void reg(httpd_handle_t s, const char *uri, httpd_method_t m, esp_err_t (*h)(httpd_req_t *)) {
     httpd_uri_t u = { .uri = uri, .method = m, .handler = h };
@@ -620,5 +635,6 @@ void web_ui_start(void) {
     reg(s, "/api/pfx/learn",  HTTP_POST, h_pfx_learn);
     reg(s, "/api/pfx/cmd",    HTTP_POST, h_pfx_cmd);
     reg(s, "/api/pfx/forget", HTTP_POST, h_pfx_forget);
+    reg(s, "/api/pfx/save_volet", HTTP_POST, h_pfx_save_volet);
     ESP_LOGI(TAG, "HTTP UI demarree");
 }

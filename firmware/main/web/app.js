@@ -415,8 +415,19 @@ async function pfxCmd(cmd, btn) {
 if ($('#pfx-up')) $('#pfx-up').onclick = () => pfxCmd('up', $('#pfx-up'));
 if ($('#pfx-stop')) $('#pfx-stop').onclick = () => pfxCmd('stop', $('#pfx-stop'));
 if ($('#pfx-down')) $('#pfx-down').onclick = () => pfxCmd('down', $('#pfx-down'));
+if ($('#pfx-save-volet')) $('#pfx-save-volet').onclick = async () => {
+  const name = ($('#pfx-volet-name').value || '').trim();
+  if (!name) { toast('Donne un nom au volet'); return; }
+  const r = await api('/api/pfx/save_volet', { method: 'POST', body: JSON.stringify({ id: name }) }).catch(() => null);
+  if (r && r.ok) {
+    toast('Volet créé — voir l’onglet Volets');
+    $('#pfx-volet-name').value = '';
+    await loadPfx();                       // l'identité a migré vers le volet
+    if (typeof loadStatus === 'function') await loadStatus();
+  } else toast('Échec de l’enregistrement');
+};
 if ($('#pfx-forget')) $('#pfx-forget').onclick = async () => {
-  if (!confirm('Oublier cette identité virtuelle ?')) return;
+  if (!confirm('Oublier cette identité (local — ne déprogramme pas le moteur) ?')) return;
   await api('/api/pfx/forget', { method: 'POST' }).catch(() => {});
   toast('Identité oubliée'); await loadPfx();
 };

@@ -21,6 +21,18 @@ typedef struct {
 
 int                 pfx_enrol_model_count(void);
 const pfx_model_t  *pfx_enrol_model(int id);   /* NULL si hors borne */
+uint16_t            pfx_enrol_model_te(int model);   /* TE d'émission du modèle (défaut 455) */
+
+/* Boutons PFX 0x067 — directions corrigées d'après test réel FranciaFlex M4G (2026-08-28).
+ * Partagés avec shutters pour piloter un volet virtuel. */
+#define PFX_BTN_UP     0x2
+#define PFX_BTN_STOP   0x4
+#define PFX_BTN_DOWN   0x8
+
+/* Construit la trame 66 bits on-air ('0'/'1', out[66]=NUL) pour une identité 0x067.
+ * Retourne 0 si serial valide (famille 0x067), -1 sinon. Utilisé aussi par shutters
+ * pour générer les trames d'un volet virtuel (compteur roulant géré par l'appelant). */
+int pfx_enrol_frame(uint32_t serial, uint8_t button, uint16_t counter, char out[68]);
 
 /* Identité virtuelle courante. */
 typedef struct {

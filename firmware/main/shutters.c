@@ -3,6 +3,7 @@
  * Config persistee en NVS sous forme de blob JSON (cle "cfg" du namespace "shutters").
  */
 #include "shutters.h"
+#include "pfx_enrol.h"
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
@@ -34,6 +35,12 @@ typedef struct {
     int  n_serials;
     char up[SH_BITS_LEN], down[SH_BITS_LEN], stop[SH_BITS_LEN];
     uint8_t up_btn, down_btn, stop_btn;   /* code bouton appris (pour la sync RX) */
+    /* Volet VIRTUEL (identite 0x067 enrolee) : au lieu de rejouer up/down/stop captes,
+     * on GENERE la trame a chaque appui (keeloq + compteur roulant). */
+    bool     virt;
+    uint32_t virt_serial;    /* serial 0x067 (contient le slot ; cle via pfx_key_for_serial) */
+    uint16_t virt_counter;   /* compteur roulant courant */
+    uint16_t virt_te;        /* TE d'emission du modele (415 FranciaFlex, 455 Profalux) */
     uint32_t travel_up_ms, travel_down_ms;
     int   orientation;       /* azimut de la facade (0..359, -1 = non defini) : automatisations soleil HA */
     float position;          /* 0..100 */
@@ -184,6 +191,12 @@ static char *cfg_to_json(void) {
         cJSON_AddNumberToObject(o, "travel_down_ms", v->travel_down_ms);
         cJSON_AddNumberToObject(o, "orientation", v->orientation);
         cJSON_AddNumberToObject(o, "position", (int)(v->position + 0.5f));
+        if (v->virt) {   /* volet virtuel : identite 0x067 + compteur roulant persiste */
+            cJSON_AddBoolToObject(o, "virt", true);
+            cJSON_AddNumberToObject(o, "virt_serial", v->virt_serial);
+            cJSON_AddNumberToObject(o, "virt_counter", v->virt_counter);
+            cJSON_AddNumberToObject(o, "virt_te", v->virt_te);
+        }
         cJSON_AddItemToArray(vols, o);
     }
     char *js = cJSON_PrintUnformatted(root);
@@ -380,6 +393,13 @@ static void parse_cfg_json(cJSON *root) {
         cJSON *ori = cJSON_GetObjectItem(o, "orientation");
         v->orientation    = ori ? (int)cJSON_GetNumberValue(ori) : -1;   /* -1 = non defini */
         v->position       = cJSON_GetNumberValue(cJSON_GetObjectItem(o, "position"));
+        cJSON *vt = cJSON_GetObjectItem(o, "virt");
+        if (cJSON_IsTrue(vt)) {
+            v->virt         = true;
+            v->virt_serial  = (uint32_t)cJSON_GetNumberValue(cJSON_GetObjectItem(o, "virt_serial"));
+            v->virt_counter = (uint16_t)cJSON_GetNumberValue(cJSON_GetObjectItem(o, "virt_counter"));
+            v->virt_te      = (uint16_t)cJSON_GetNumberValue(cJSON_GetObjectItem(o, "virt_te"));
+        }
     }
 }
 static void load_cfg(void) {
@@ -456,17 +476,43 @@ static uint8_t bits_button(const char *b) {
     return v;
 }
 
+/* TE d'emission configure (cfg/tx_te) pour restaurer apres une emission virtuelle. */
+static uint32_t sh_cfg_tx_te(void) {
+    uint32_t te = 455; nvs_handle_t h;
+    if (nvs_open("cfg", NVS_READONLY, &h) == ESP_OK) {
+        uint32_t t; if (nvs_get_u32(h, "tx_te", &t) == ESP_OK && t) te = t;
+        nvs_close(h);
+    }
+    return te;
+}
+/* Volet VIRTUEL : GENERE la trame (keeloq + compteur roulant) au TE du modele, l'emet,
+ * puis avance et persiste le compteur. */
+static void emit_virt(volet_t *v, uint8_t button) {
+    char bits[68];
+    if (pfx_enrol_frame(v->virt_serial, button, v->virt_counter, bits) != 0) return;
+    uint32_t prev_te = sh_cfg_tx_te();
+    cc1101_set_tx_te(v->virt_te ? v->virt_te : 455);
+    radio_tx(bits, PRESS_REPEATS);
+    cc1101_set_tx_te(prev_te);
+    ESP_LOGW(TAG, "TX VIRT serial=0x%07X btn=0x%X cnt=%u te=%u",
+             (unsigned)v->virt_serial, button, v->virt_counter, v->virt_te);
+    v->virt_counter++;
+    save_cfg();   /* le compteur roulant doit survivre au reboot */
+}
+
 /* Demarre un mouvement (dir=+1 up / -1 down) : UNE rafale (appui), puis le moteur part seul.
  * On integre juste la position ensuite ; l'arret se fait par do_stop (rafale STOP) au bon moment. */
 static void start_move(volet_t *v, int dir) {
     v->dir = dir; v->own_move = true;
     v->last_tick_us = esp_timer_get_time();
     radio_pause_rx(true);   /* le temps de nos rafales, l'ecoute permanente ne doit pas bloquer le TX */
-    emit_press(dir > 0 ? v->up : v->down);
+    if (v->virt) emit_virt(v, dir > 0 ? PFX_BTN_UP : PFX_BTN_DOWN);
+    else         emit_press(dir > 0 ? v->up : v->down);
 }
 static void do_stop(volet_t *v) {
     v->dir = 0; v->target = -1; v->own_move = false; s_pos_dirty = true;   /* fin mouvement : suivi telecommande OK + retenir la position */
-    emit_press(v->stop);    /* rafale STOP = fige le moteur a la position voulue */
+    if (v->virt) emit_virt(v, PFX_BTN_STOP);
+    else         emit_press(v->stop);    /* rafale STOP = fige le moteur a la position voulue */
     radio_pause_rx(false);  /* fin de notre commande : on reprend l'ecoute (sync + frame-log) */
 }
 /* Sync depuis une commande EXTERNE (vraie telecommande) : suit sans emettre.
@@ -681,6 +727,30 @@ int shutters_learn_assign(const char *id, const char *action, const char *bits) 
     update_listening();    /* 1er volet appris -> allume l'ecoute pour le suivi de position */
     UNLOCK();
     pub_flush();
+    return 0;
+}
+
+/* Cree (ou convertit) un volet VIRTUEL a partir d'une identite 0x067 enrolee : il apparait
+ * dans l'onglet Volets + en cover HA, et pilote le moteur par generation (compteur roulant). */
+int shutters_create_virtual(const char *id, uint32_t serial, uint16_t counter, uint16_t te) {
+    if (!id || !*id) return -1;
+    LOCK();
+    volet_t *v = get_or_create(id);
+    if (!v) { UNLOCK(); return -1; }
+    v->virt = true;
+    v->virt_serial = serial;
+    v->virt_counter = counter;
+    v->virt_te = te;
+    char shex[SH_SERIAL_LEN]; snprintf(shex, sizeof(shex), "0x%07X", (unsigned)serial);
+    bool has = false;
+    for (int i = 0; i < v->n_serials; i++) if (!strcmp(v->serials[i], shex)) { has = true; break; }
+    if (!has && v->n_serials < SH_MAX_SERIALS) strlcpy(v->serials[v->n_serials++], shex, SH_SERIAL_LEN);
+    save_cfg();
+    announce_one(v);
+    UNLOCK();
+    pub_flush();
+    ESP_LOGW(TAG, "volet virtuel '%s' cree : identite 0x%07X cnt=%u te=%u",
+             id, (unsigned)serial, counter, te);
     return 0;
 }
 

@@ -103,7 +103,12 @@
             <h3>2. Tester la nouvelle identité</h3>
             <p class="sub">Si le moteur a bien appris, ces boutons doivent le piloter.</p>
             <div class="dpad enrol-pad"><button id="pfx-up">▲</button><button id="pfx-stop">■</button><button id="pfx-down">▼</button></div>
-            <div class="row" style="margin-top:12px"><button id="pfx-forget" class="btn danger">🗑 Oublier cette identité</button></div>
+            <h3>3. Enregistrer comme volet</h3>
+            <p class="sub">Pour le retrouver dans l'onglet <b>Volets</b> et le piloter depuis Home Assistant.</p>
+            <div class="field"><div class="row" style="flex-wrap:nowrap">
+              <input id="pfx-volet-name" placeholder="Nom du volet (ex : Salon)" style="flex:1;min-width:0">
+              <button id="pfx-save-volet" class="btn primary">💾 Enregistrer</button></div></div>
+            <div class="row" style="margin-top:12px"><button id="pfx-forget" class="btn danger">🗑 Oublier (local — ne déprogramme pas le moteur)</button></div>
           </div>
         </div>
       </div>

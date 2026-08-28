@@ -21,11 +21,7 @@ static const char *NVS_NS = "pfx_enrol";
 
 /* Rafale par appui = ~9 trames (mesuré sur trames réelles Lecanard). Compteur figé sur la rafale. */
 #define PFX_BURST     9
-/* Carte des boutons PFX 0x067. Directions CORRIGÉES d'après test réel FranciaFlex M4G
- * (Lecanard, 2026-08-28) : montée=0x2, arrêt=0x4 (étaient inversés), descente=0x8. */
-#define BTN_UP      0x2
-#define BTN_STOP    0x4
-#define BTN_DOWN    0x8
+/* Directions (montée/arrêt/descente) = PFX_BTN_* dans pfx_enrol.h (partagées avec shutters). */
 #define BTN_LEARN   0x5   /* trame d'apprentissage radio */
 
 /* Catalogue : tous routés canal PFX 0x636f, famille 0x067, même table de clés.
@@ -91,10 +87,12 @@ static inline uint8_t rev4(uint8_t b) {
     return (uint8_t)(((b & 1) << 3) | ((b & 2) << 1) | ((b & 4) >> 1) | ((b & 8) >> 3));
 }
 
-/* Construit la trame 66 bits on-air ('0'/'1', out[66]=NUL) pour l'identité courante. */
-static void build_bits(uint8_t button, uint16_t counter, char out[68]) {
-    uint64_t key = 0; pfx_key_for_serial(s_id.serial, &key, NULL);
-    uint16_t discrim = (uint16_t)(s_id.serial & 0xFFF);
+/* Construit la trame 66 bits on-air ('0'/'1', out[66]=NUL) pour une identité 0x067.
+ * Retourne 0 si serial valide (famille 0x067), -1 sinon. Public (cf. pfx_enrol.h). */
+int pfx_enrol_frame(uint32_t serial, uint8_t button, uint16_t counter, char out[68]) {
+    uint64_t key = 0;
+    if (!pfx_key_for_serial(serial, &key, NULL)) { out[0] = 0; return -1; }
+    uint16_t discrim = (uint16_t)(serial & 0xFFF);
     uint32_t plain = ((uint32_t)(button & 0xF) << 28) | ((uint32_t)(discrim & 0xFFF) << 16) | counter;
     uint32_t enc = keeloq_encrypt(plain, key);
     uint32_t enc_tx = 0;                                   /* hop LSB-first */
@@ -103,12 +101,17 @@ static void build_bits(uint8_t button, uint16_t counter, char out[68]) {
     frame[0] = (enc_tx >> 24) & 0xFF; frame[1] = (enc_tx >> 16) & 0xFF;
     frame[2] = (enc_tx >>  8) & 0xFF; frame[3] =  enc_tx        & 0xFF;
     uint32_t sr = 0;                                       /* serial 28b LSB-first */
-    for (int k = 0; k < 28; k++) sr |= ((s_id.serial >> k) & 1u) << (27 - k);
+    for (int k = 0; k < 28; k++) sr |= ((serial >> k) & 1u) << (27 - k);
     frame[4] = (sr >> 20) & 0xFF; frame[5] = (sr >> 12) & 0xFF; frame[6] = (sr >> 4) & 0xFF;
     frame[7] = ((sr & 0xF) << 4) | rev4(button);
     frame[8] = 0x40;                                       /* statut '01' = RPT=1 */
     for (int i = 0; i < 66; i++) out[i] = ((frame[i / 8] >> (7 - (i % 8))) & 1) ? '1' : '0';
     out[66] = 0;
+    return 0;
+}
+
+uint16_t pfx_enrol_model_te(int model) {
+    return (model >= 0 && model < N_MODELS) ? MODELS[model].te_us : 455;
 }
 
 /* Lit le TE d'émission configuré (cfg/tx_te) pour le restaurer après notre émission. */
@@ -124,7 +127,7 @@ static uint32_t cfg_tx_te(void) {
 static int emit(uint8_t button, uint16_t counter) {
     if (!s_id.active) return -1;
     const pfx_model_t *m = &MODELS[s_id.model];
-    char bits[68]; build_bits(button, counter, bits);
+    char bits[68]; pfx_enrol_frame(s_id.serial, button, counter, bits);
     uint32_t prev_te = cfg_tx_te();
     cc1101_set_tx_te(m->te_us);          /* TE du modèle le temps de la rafale */
     radio_tx(bits, PFX_BURST);           /* rafale, compteur figé sur toute la rafale */
@@ -144,9 +147,9 @@ int pfx_enrol_emit_learn(void) {
 int pfx_enrol_cmd(const char *cmd) {
     if (!s_id.active || !cmd) return -1;
     uint8_t b;
-    if      (!strcmp(cmd, "up"))   b = BTN_UP;
-    else if (!strcmp(cmd, "stop")) b = BTN_STOP;
-    else if (!strcmp(cmd, "down")) b = BTN_DOWN;
+    if      (!strcmp(cmd, "up"))   b = PFX_BTN_UP;
+    else if (!strcmp(cmd, "stop")) b = PFX_BTN_STOP;
+    else if (!strcmp(cmd, "down")) b = PFX_BTN_DOWN;
     else return -1;
     int rc = emit(b, s_id.counter);
     if (rc == 0) { s_id.counter++; save(); }
