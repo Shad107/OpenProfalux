@@ -15,12 +15,17 @@
 #include "nvs.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG    = "pfx_enrol";
 static const char *NVS_NS = "pfx_enrol";
 
 /* Rafale par appui = ~9 trames (mesuré sur trames réelles Lecanard). Compteur figé sur la rafale. */
 #define PFX_BURST     9
+/* Apprentissage tenu ~5 s (comme STOP-en-P maintenu 5 s) : le moteur ne confirme
+ * (va-et-vient) qu'apres ~5 s. ~5 salves de PFX_BURST ~= 5 s. */
+#define PFX_LEARN_ROUNDS 5
 /* Directions (montée/arrêt/descente) = PFX_BTN_* dans pfx_enrol.h (partagées avec shutters). */
 #define BTN_LEARN   0x5   /* trame d'apprentissage radio */
 
@@ -139,9 +144,24 @@ static int emit(uint8_t button, uint16_t counter) {
 
 int pfx_enrol_emit_learn(void) {
     if (!s_id.active) return -1;
-    int rc = emit(BTN_LEARN, 3);         /* trame d'apprentissage : bouton 0x5, compteur figé = 3 */
-    if (rc == 0) { s_id.counter = 4; save(); }   /* commandes de test à partir de 4 */
-    return rc;
+    /* Trame d'apprentissage (btn5, compteur FIGÉ = 3) tenue ~5 s : on répète la même trame
+     * en salves, avec un yield entre chaque (nourrit le watchdog, évite un bit-bang bloquant
+     * de 5 s d'un coup). Le moteur ne fait son va-et-vient de confirmation qu'après ~5 s. */
+    const pfx_model_t *m = &MODELS[s_id.model];
+    char bits[68];
+    pfx_enrol_frame(s_id.serial, BTN_LEARN, 3, bits);
+    uint32_t prev_te = cfg_tx_te();
+    cc1101_set_tx_te(m->te_us);
+    for (int i = 0; i < PFX_LEARN_ROUNDS; i++) {
+        radio_tx(bits, PFX_BURST);
+        vTaskDelay(pdMS_TO_TICKS(15));
+    }
+    cc1101_set_tx_te(prev_te);
+    ESP_LOGW(TAG, "TX 0x067 APPRENTISSAGE serial=0x%07X btn=0x5 cnt=3 (~5s, %d salves) te=%u",
+             (unsigned)s_id.serial, PFX_LEARN_ROUNDS, m->te_us);
+    s_id.counter = 4;   /* commandes de test à partir de 4 */
+    save();
+    return 0;
 }
 
 int pfx_enrol_cmd(const char *cmd) {

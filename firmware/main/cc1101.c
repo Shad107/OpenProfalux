@@ -290,6 +290,10 @@ int cc1101_tx_raw_bits(const char *bits, int n, int repeats) {
     strobe(CC_STX);
     esp_rom_delay_us(800);   /* laisse le PLL se caler + la PA monter avant de moduler */
     g_tx_marc = cc1101_read_reg(CC_MARCSTATE | 0x40) & 0x1F;
+    /* Preuve d'emission sur le serie : MARCSTATE 0x13 = la puce est bien en TX (elle module
+     * l'antenne). Loggue avant le bit-bang, au point exact ou la trame part. */
+    ESP_LOGW(TAG, "TX RAW: emission de %d trame(s) x%d bits, MARCSTATE=0x%02X (%s)",
+             repeats, n, g_tx_marc, g_tx_marc == 0x13 ? "TX ACTIF" : "PAS EN TX !");
     /* Timing derive du TE reglable : bit '1'=TE haut/2TE bas, '0'=2TE haut/TE bas,
      * preambule=TE, entete proportionnelle a TE (= HEADER a TE nominal). */
     const uint32_t te = s_tx_te, te2 = 2 * s_tx_te;
