@@ -21,11 +21,12 @@ static const char *NVS_NS = "pfx_enrol";
 
 /* Rafale par appui = ~9 trames (mesuré sur trames réelles Lecanard). Compteur figé sur la rafale. */
 #define PFX_BURST     9
-/* Carte des boutons PFX 0x067 (prouvée sur trames réelles). */
-#define BTN_STOP    0x2
-#define BTN_UP      0x4
+/* Carte des boutons PFX 0x067. Directions CORRIGÉES d'après test réel FranciaFlex M4G
+ * (Lecanard, 2026-08-28) : montée=0x2, arrêt=0x4 (étaient inversés), descente=0x8. */
+#define BTN_UP      0x2
+#define BTN_STOP    0x4
 #define BTN_DOWN    0x8
-#define BTN_LEARN   0x5   /* shutter LEVEL=50 = la trame d'apprentissage radio */
+#define BTN_LEARN   0x5   /* trame d'apprentissage radio */
 
 /* Catalogue : tous routés canal PFX 0x636f, famille 0x067, même table de clés.
  * Seuls le TE et la chorégraphie (R6/R7/R8) diffèrent par modèle. */
