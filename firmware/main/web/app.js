@@ -353,23 +353,22 @@ $('#cal-save').onclick = () => { api('/api/calibrate', { method: 'POST',
 /* ── Enrôlement d'une identité virtuelle 0x067 (expérimental, sans télécommande) ── */
 const PFX_GESTURES = {
   R6: [
-    'Mets le volet en position avec ~4 lames apparentes.',
-    'Clique « Émettre la trame d\'apprentissage » ci-dessous (rafale ~1 s).',
-    'Dans la minute : si tu as encore une télécommande d\'origine, fais montée → descente ~4 lames → stop → remontée.',
-    'Moteur vierge (jamais appairé) : coupe puis remets le courant du moteur, et émets la trame dans la minute qui suit la remise sous tension.',
-    'Le volet fait un va-et-vient = enrôlement réussi. Teste alors ▲ ■ ▼ ci-dessous.',
+    'Clique « Émettre la trame d\'apprentissage » : l\'émission dure ~5 s.',
+    '⏳ ATTENDS la fin des 5 s — ne fais RIEN pendant l\'émission.',
+    'PUIS, sur ta télécommande d\'origine : montée (jusqu\'en butée haute) → descente ~4 lames → montée (jusqu\'en butée haute).',
+    'Le volet fait un va-et-vient = enrôlé ✅. Teste alors ▲ ■ ▼ ci-dessous.',
   ],
   R7: [
-    'Mets le volet en position avec ~4 lames apparentes.',
-    'Clique « Émettre la trame d\'apprentissage » ci-dessous.',
-    'Chorégraphie propre à ce modèle non encore détaillée : tente la procédure ci-dessus (montée → descente 4 lames → stop → remontée) et rapporte le résultat sur GitHub.',
-    'Le volet fait un va-et-vient = enrôlement réussi. Teste alors ▲ ■ ▼.',
+    'Clique « Émettre la trame d\'apprentissage » (~5 s) et ATTENDS la fin.',
+    'PUIS, sur ta télécommande d\'origine : montée → descente ~4 lames → montée.',
+    'Modèle MAI-RD : procédure proche mais à confirmer — rapporte le résultat sur GitHub.',
+    'Va-et-vient = enrôlé. Teste ▲ ■ ▼.',
   ],
   R8: [
-    'Mets le volet en position avec ~4 lames apparentes.',
-    'Clique « Émettre la trame d\'apprentissage » ci-dessous.',
-    'Modèle NeoSol : chorégraphie R8 non encore détaillée. Tente la procédure montée → descente 4 lames → stop → remontée dans la minute, et rapporte le résultat sur GitHub.',
-    'Le volet fait un va-et-vient = enrôlement réussi. Teste alors ▲ ■ ▼.',
+    'Clique « Émettre la trame d\'apprentissage » (~5 s) et ATTENDS la fin.',
+    'PUIS, sur ta télécommande d\'origine : montée → descente ~4 lames → montée.',
+    'Modèle NeoSol : à confirmer (compteur roulant appliqué, le rejeu simple est refusé) — rapporte le résultat sur GitHub.',
+    'Va-et-vient = enrôlé. Teste ▲ ■ ▼.',
   ],
 };
 let pfxModels = [];
@@ -399,9 +398,15 @@ if ($('#pfx-new')) $('#pfx-new').onclick = async () => {
   await loadPfx();
 };
 if ($('#pfx-learn')) $('#pfx-learn').onclick = async () => {
-  const b = $('#pfx-learn'); if (radioBusy) return;
-  setRadioBusy(true); b.disabled = true; const o = b.textContent; b.textContent = '📡 Émission…';
-  try { const r = await api('/api/pfx/learn', { method: 'POST' }); toast(r && r.ok ? 'Trame d\'apprentissage émise' : 'Échec (radio occupée ?)'); }
+  const b = $('#pfx-learn');
+  if (radioBusy) { toast('Radio occupée, réessaie dans un instant'); return; }   // plus de clic avalé en silence
+  setRadioBusy(true); b.disabled = true; const o = b.textContent; b.textContent = '📡 Émission ~5 s… ne bouge pas';
+  try {
+    const r = await api('/api/pfx/learn', { method: 'POST' });
+    toast(r && r.ok
+      ? '✅ Émis — MAINTENANT sur ta télécommande : montée → descente 4 lames → montée'
+      : 'Échec (radio occupée ?)');
+  }
   catch (e) { toast('Radio occupée, réessaie dans un instant'); }
   finally { b.disabled = false; b.textContent = o; setRadioBusy(false); await loadPfx(); }
 };
