@@ -90,17 +90,21 @@
 
       <div class="subpanel" data-sp="enrol">
         <div class="card">
-          <div class="statline bad"><span class="dot"></span><b>Expérimental.</b> Crée une identité virtuelle et l'enrôle directement sur le moteur, sans télécommande d'origine. Non garanti selon le modèle de moteur. Le clonage (onglet <b>Apprentissage</b>) reste la voie sûre.</div>
-          <h2>Enrôlement sans télécommande</h2>
-          <p class="sub">Choisis ton modèle de moteur (comme l'appli d'origine), génère une identité virtuelle, puis suis les gestes pour l'apprendre au moteur.</p>
+          <div class="statline"><span class="dot"></span><b>Enrôlement d'un moteur Profalux / FranciaFlex.</b> Appuie sur ta télécommande d'origine : le boîtier l'identifie et lui attribue une identité — <b>nouvelle</b> si le moteur est inconnu, <b>la même</b> que la dernière fois s'il est déjà connu. Puis suis les gestes pour l'apprendre au moteur.</div>
+          <h2>Enrôlement du moteur</h2>
           <div class="field"><label>Modèle de moteur</label><select id="pfx-model"></select></div>
-          <div class="row"><button id="pfx-new" class="btn primary">Générer une identité virtuelle</button></div>
+          <div class="row"><button id="pfx-capture" class="btn primary">📡 Appuie sur ta télécommande d'origine</button></div>
+          <div class="statline" id="pfx-capture-status" hidden><span class="dot"></span><b></b></div>
           <div class="statline" id="pfx-ident" hidden><span class="dot"></span><b></b></div>
           <div id="pfx-steps" hidden>
             <h3>1. Enrôler l'identité sur le moteur</h3>
-            <ol class="steps" id="pfx-gestures"></ol>
-            <div class="row"><button id="pfx-learn" class="btn primary">📡 Émettre la trame d'apprentissage</button></div>
-            <p class="hint">⏳ L'émission dure ~5 s. <b>Attends la fin</b> (le message de confirmation) <b>avant</b> de faire les gestes sur ta télécommande.</p>
+            <p class="sub">Clique ci-dessous : l'émission dure ~5 s. <b>Ne touche à rien</b> pendant. Les gestes à faire sur ta télécommande s'afficheront <b>à la fin</b> de l'émission.</p>
+            <div class="row"><button id="pfx-learn" class="btn primary">📡 Émettre la trame d'apprentissage (~5 s)</button></div>
+            <div class="statline" id="pfx-learn-status" hidden><span class="dot"></span><b></b></div>
+            <div id="pfx-after-emit" hidden>
+              <p class="sub"><b>✅ Émission finie — fais MAINTENANT sur ta télécommande d'origine :</b></p>
+              <ol class="steps" id="pfx-gestures"></ol>
+            </div>
             <h3>2. Tester la nouvelle identité</h3>
             <p class="sub">Si le moteur a bien appris, ces boutons doivent le piloter.</p>
             <div class="dpad enrol-pad"><button id="pfx-up">▲</button><button id="pfx-stop">■</button><button id="pfx-down">▼</button></div>
@@ -109,7 +113,7 @@
             <div class="field"><div class="row" style="flex-wrap:nowrap">
               <input id="pfx-volet-name" placeholder="Nom du volet (ex : Salon)" style="flex:1;min-width:0">
               <button id="pfx-save-volet" class="btn primary">💾 Enregistrer</button></div></div>
-            <div class="row" style="margin-top:12px"><button id="pfx-forget" class="btn danger">🗑 Oublier (local — ne déprogramme pas le moteur)</button></div>
+            <div class="row" style="margin-top:12px"><button id="pfx-forget" class="btn">↩ Désélectionner (garde l'identité et son compteur)</button></div>
           </div>
         </div>
       </div>

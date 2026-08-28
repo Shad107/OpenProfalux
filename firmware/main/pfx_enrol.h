@@ -6,7 +6,8 @@
  * d'apprentissage. L'utilisateur choisit son modèle : le modèle fixe le TE d'émission et la
  * chorégraphie de gestes.
  *
- * Non prouvé sur moteur réel (question self-learn vs normal-learn). Le clonage reste la voie sûre.
+ * Le moteur valide en normal-learn : il dérive la clé du serial émis. L'enrôlement nécessite
+ * la télécommande d'origine pour la gestuelle de validation (double accostage en butée).
  */
 #pragma once
 #include <stdint.h>
@@ -38,17 +39,25 @@ int pfx_enrol_frame(uint32_t serial, uint8_t button, uint16_t counter, char out[
 typedef struct {
     bool     active;
     int      model;
-    uint8_t  idx;        /* slot 0..62 dans le pool de clés */
-    uint32_t serial;     /* 28-bit (serial & 0x3FF == 0x067) */
+    uint8_t  idx;        /* slot 0..62 */
+    uint32_t serial;     /* 28-bit */
     uint16_t counter;    /* compteur roulant courant */
+    uint64_t key;        /* clé KeeLoq du slot (table obfusquée) */
+    uint32_t remote;     /* serial de la vraie télécommande associée (0 = aucune) */
 } pfx_ident_t;
 
 void pfx_enrol_init(void);              /* charge l'identité depuis NVS (idempotent) */
 bool pfx_enrol_get(pfx_ident_t *out);   /* copie l'identité courante ; retourne active */
 
-/* Génère une identité fraîche pour `model`. Retourne l'index de slot [0,62] ou -1. */
-int  pfx_enrol_new_identity(int model);
-/* Oublie l'identité courante (efface l'état). */
+/* Capture : associe la vraie télécommande `remote` (serial capté en RX) à une identité 0x067,
+ * et la charge comme identité courante.
+ *   remote CONNU   -> recharge la même identité déjà attribuée (*is_new=false) ;
+ *   remote INCONNU -> alloue le PROCHAIN slot libre (jamais un déjà pris) et le mémorise
+ *                     DÉFINITIVEMENT (*is_new=true).
+ * Retourne 0 (ok), -1 (plein : 63 identités déjà prises), -2 (remote invalide). */
+int  pfx_enrol_capture(uint32_t remote, int model, bool *is_new);
+
+/* Oublie l'identité courante : libère son slot dans la table (réattribuable) et efface l'état. */
 void pfx_enrol_forget(void);
 
 /* Émet la trame d'apprentissage (bouton LEARN, compteur figé) en rafale. 0 si OK. */

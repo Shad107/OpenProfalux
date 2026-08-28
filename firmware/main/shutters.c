@@ -489,15 +489,18 @@ static uint32_t sh_cfg_tx_te(void) {
  * puis avance et persiste le compteur. */
 static void emit_virt(volet_t *v, uint8_t button) {
     char bits[68];
-    if (pfx_enrol_frame(v->virt_serial, button, v->virt_counter, bits) != 0) return;
+    uint16_t cnt = v->virt_counter;
+    if (pfx_enrol_frame(v->virt_serial, button, cnt, bits) != 0) return;
+    /* Réserve-puis-émets : on persiste le PROCHAIN compteur AVANT d'émettre. Un crash entre les
+     * deux fait au pire sauter un compteur (toléré par la fenêtre KeeLoq), jamais un rejeu. */
+    v->virt_counter = cnt + 1;
+    save_cfg();
     uint32_t prev_te = sh_cfg_tx_te();
     cc1101_set_tx_te(v->virt_te ? v->virt_te : 455);
     radio_tx(bits, PRESS_REPEATS);
     cc1101_set_tx_te(prev_te);
     ESP_LOGW(TAG, "TX VIRT serial=0x%07X btn=0x%X cnt=%u te=%u",
-             (unsigned)v->virt_serial, button, v->virt_counter, v->virt_te);
-    v->virt_counter++;
-    save_cfg();   /* le compteur roulant doit survivre au reboot */
+             (unsigned)v->virt_serial, button, cnt, v->virt_te);
 }
 
 /* Demarre un mouvement (dir=+1 up / -1 down) : UNE rafale (appui), puis le moteur part seul.
@@ -727,6 +730,20 @@ int shutters_learn_assign(const char *id, const char *action, const char *bits) 
     update_listening();    /* 1er volet appris -> allume l'ecoute pour le suivi de position */
     UNLOCK();
     pub_flush();
+    return 0;
+}
+
+/* true si un volet virtuel utilise deja ce serial 0x067 (evite les conflits d'allocation de slot). */
+bool shutters_virt_serial_used(uint32_t serial) {
+    for (int i = 0; i < s_nvolets; i++)
+        if (s_volets[i].virt && s_volets[i].virt_serial == serial) return true;
+    return false;
+}
+/* Compteur roulant courant du volet virtuel de ce serial (0 si aucun). Sert a resynchroniser
+ * l'identite d'enrolement sur la valeur reellement emise par le volet (toujours devant le moteur). */
+uint16_t shutters_virt_counter_for_serial(uint32_t serial) {
+    for (int i = 0; i < s_nvolets; i++)
+        if (s_volets[i].virt && s_volets[i].virt_serial == serial) return s_volets[i].virt_counter;
     return 0;
 }
 

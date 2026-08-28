@@ -351,24 +351,21 @@ $('#cal-save').onclick = () => { api('/api/calibrate', { method: 'POST',
   body: JSON.stringify({ id: calId(), travel_up_ms: calT.up, travel_down_ms: calT.down }) }); calibLive = false; toast('Calibration enregistrée'); };
 
 /* ── Enrôlement d'une identité virtuelle 0x067 (expérimental, sans télécommande) ── */
+/* Gestes PHYSIQUES à faire APRÈS l'émission (révélés seulement à la fin des 5 s). */
 const PFX_GESTURES = {
   R6: [
-    'Clique « Émettre la trame d\'apprentissage » : l\'émission dure ~5 s.',
-    '⏳ ATTENDS la fin des 5 s — ne fais RIEN pendant l\'émission.',
-    'PUIS, sur ta télécommande d\'origine : montée (jusqu\'en butée haute) → descente ~4 lames → montée (jusqu\'en butée haute).',
-    'Le volet fait un va-et-vient = enrôlé ✅. Teste alors ▲ ■ ▼ ci-dessous.',
+    'Monte le volet jusqu\'en butée haute.',
+    'Descends de ~4 lames.',
+    'Remonte jusqu\'en butée haute.',
+    'Le volet fait un va-et-vient = enrôlé ✅. Teste ▲ ■ ▼ ci-dessous.',
   ],
   R7: [
-    'Clique « Émettre la trame d\'apprentissage » (~5 s) et ATTENDS la fin.',
-    'PUIS, sur ta télécommande d\'origine : montée → descente ~4 lames → montée.',
-    'Modèle MAI-RD : procédure proche mais à confirmer — rapporte le résultat sur GitHub.',
-    'Va-et-vient = enrôlé. Teste ▲ ■ ▼.',
+    'Monte → descends ~4 lames → remonte (procédure proche, à confirmer).',
+    'Va-et-vient = enrôlé. Teste ▲ ■ ▼. Rapporte le résultat sur GitHub.',
   ],
   R8: [
-    'Clique « Émettre la trame d\'apprentissage » (~5 s) et ATTENDS la fin.',
-    'PUIS, sur ta télécommande d\'origine : montée → descente ~4 lames → montée.',
-    'Modèle NeoSol : à confirmer (compteur roulant appliqué, le rejeu simple est refusé) — rapporte le résultat sur GitHub.',
-    'Va-et-vient = enrôlé. Teste ▲ ■ ▼.',
+    'Monte → descends ~4 lames → remonte (NeoSol : à confirmer, compteur roulant).',
+    'Va-et-vient = enrôlé. Teste ▲ ■ ▼. Rapporte le résultat sur GitHub.',
   ],
 };
 let pfxModels = [];
@@ -385,29 +382,65 @@ async function loadPfx() {
   if (!box) return;
   if (d.active) {
     box.hidden = false; steps.hidden = false; box.className = 'statline ok';
-    box.querySelector('b').textContent = `Identité ${d.serial} · slot ${d.idx + 1}/63 · compteur ${d.counter}`;
+    box.querySelector('b').textContent = `Identité ${d.serial} · slot ${d.idx + 1}/63 · compteur ${d.counter}`
+      + (d.remote && d.remote !== '0x0000000' ? ` · télécommande ${d.remote}` : '');
     if (sel) sel.value = String(d.model);
     const ol = $('#pfx-gestures'); const m = pfxModels[d.model];
     if (ol && m) ol.innerHTML = (PFX_GESTURES[m.routine] || PFX_GESTURES.R6).map(s => `<li>${s}</li>`).join('');
   } else { box.hidden = true; steps.hidden = true; }
 }
-if ($('#pfx-new')) $('#pfx-new').onclick = async () => {
+function pfxResetSteps() {   // nouvelle identité -> on recache les gestes jusqu'à la prochaine émission
+  const after = $('#pfx-after-emit'); if (after) after.hidden = true;
+  const st = $('#pfx-learn-status'); if (st) st.hidden = true;
+}
+function pfxCapStatus(txt, cls) {
+  const st = $('#pfx-capture-status'); if (!st) return;
+  st.hidden = false; st.className = 'statline' + (cls ? ' ' + cls : '');
+  st.querySelector('b').textContent = txt;
+}
+if ($('#pfx-capture')) $('#pfx-capture').onclick = async () => {
+  const b = $('#pfx-capture'), o = b.textContent;
   const model = Number($('#pfx-model').value || 0);
-  const r = await api('/api/pfx/new', { method: 'POST', body: JSON.stringify({ model }) }).catch(() => null);
-  toast(r && r.ok ? 'Identité virtuelle générée' : 'Échec de la génération');
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  b.disabled = true; setRadioBusy(true);
+  const r = await api('/api/pfx/capture', { method: 'POST', body: JSON.stringify({ model }) }).catch(() => null);
+  if (!r || !r.ok) { pfxCapStatus('Échec du démarrage de la capture', 'bad'); b.disabled = false; setRadioBusy(false); return; }
+  let n = 15, d = null;
+  const timer = setInterval(() => { n = Math.max(0, n - 1); pfxCapStatus(`📡 Appuie MAINTENANT sur ta télécommande d'origine… ${n} s`); }, 1000);
+  pfxCapStatus("📡 Appuie MAINTENANT sur ta télécommande d'origine… 15 s");
+  for (let i = 0; i < 20; i++) { await wait(1000); d = await api('/api/pfx/capture/poll').catch(() => null); if (d && d.done) break; }
+  clearInterval(timer);
+  b.disabled = false; b.textContent = o; setRadioBusy(false);
+  if (!d || !d.done) pfxCapStatus('Aucune réponse du boîtier', 'bad');
+  else if (d.rc === 0 && d.new) { pfxCapStatus(`✅ Nouveau moteur — identité ${d.serial} attribuée (télécommande ${d.remote})`, 'ok'); pfxResetSteps(); }
+  else if (d.rc === 0) pfxCapStatus(`✅ Moteur déjà connu — même identité ${d.serial} (télécommande ${d.remote})`, 'ok');
+  else if (d.rc === -1) pfxCapStatus('⚠️ 63 identités déjà attribuées : oublie-en une pour libérer un slot.', 'bad');
+  else if (d.rc === -3) pfxCapStatus("⏱ Aucune trame captée — réessaie en appuyant sur la télécommande.", 'bad');
+  else pfxCapStatus('Télécommande non reconnue', 'bad');
   await loadPfx();
 };
+function pfxStatus(txt, cls) {
+  const st = $('#pfx-learn-status'); if (!st) return;
+  st.hidden = false; st.className = 'statline' + (cls ? ' ' + cls : '');
+  st.querySelector('b').textContent = txt;
+}
 if ($('#pfx-learn')) $('#pfx-learn').onclick = async () => {
   const b = $('#pfx-learn');
   if (radioBusy) { toast('Radio occupée, réessaie dans un instant'); return; }   // plus de clic avalé en silence
-  setRadioBusy(true); b.disabled = true; const o = b.textContent; b.textContent = '📡 Émission ~5 s… ne bouge pas';
+  const after = $('#pfx-after-emit');
+  if (after) after.hidden = true;                          // cache les gestes PENDANT l'émission
+  setRadioBusy(true); b.disabled = true; const o = b.textContent; b.textContent = '📡 Émission…';
+  let n = 5; pfxStatus('⏳ Émission ~5 s — ne touche à rien… ' + n + ' s');
+  const timer = setInterval(() => { n = Math.max(0, n - 1); pfxStatus('⏳ Émission ~5 s — ne touche à rien… ' + n + ' s'); }, 1000);
   try {
     const r = await api('/api/pfx/learn', { method: 'POST' });
-    toast(r && r.ok
-      ? '✅ Émis — MAINTENANT sur ta télécommande : montée → descente 4 lames → montée'
-      : 'Échec (radio occupée ?)');
+    clearInterval(timer);
+    if (r && r.ok) {
+      pfxStatus('✅ Émission finie — fais les gestes ci-dessous MAINTENANT.', 'ok');
+      if (after) after.hidden = false;                     // révèle les gestes SEULEMENT à la fin
+    } else pfxStatus('Échec (radio occupée ?)', 'bad');
   }
-  catch (e) { toast('Radio occupée, réessaie dans un instant'); }
+  catch (e) { clearInterval(timer); pfxStatus('Radio occupée, réessaie dans un instant.', 'bad'); }
   finally { b.disabled = false; b.textContent = o; setRadioBusy(false); await loadPfx(); }
 };
 async function pfxCmd(cmd, btn) {
@@ -432,9 +465,8 @@ if ($('#pfx-save-volet')) $('#pfx-save-volet').onclick = async () => {
   } else toast('Échec de l’enregistrement');
 };
 if ($('#pfx-forget')) $('#pfx-forget').onclick = async () => {
-  if (!confirm('Oublier cette identité (local — ne déprogramme pas le moteur) ?')) return;
   await api('/api/pfx/forget', { method: 'POST' }).catch(() => {});
-  toast('Identité oubliée'); await loadPfx();
+  toast('Identité désélectionnée · compteur conservé'); await loadPfx();
 };
 
 /* ── Config : Wi-Fi / MQTT / Système (sauvegardes séparées, partielles) ── */

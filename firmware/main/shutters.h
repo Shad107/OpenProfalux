@@ -68,4 +68,8 @@ int  shutters_export_json(char *buf, int cap);
 /* Restaure la config depuis un JSON (remplace tout). Retourne 0 si OK. */
 int  shutters_import_json(const char *js);
 
+/* ── Identités virtuelles PFX (anti-conflit + resync compteur pour l'enrôlement) ── */
+bool     shutters_virt_serial_used(uint32_t serial);        /* serial 0x067 déjà pris par un volet ? */
+uint16_t shutters_virt_counter_for_serial(uint32_t serial); /* compteur du volet de ce serial (0 si aucun) */
+
 #endif

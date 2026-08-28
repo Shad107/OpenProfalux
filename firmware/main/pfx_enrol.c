@@ -9,12 +9,12 @@
 #include "pfx_enrol.h"
 #include "keeloq.h"
 #include "pfx_keys.h"
+#include "shutters.h"
 #include "radio.h"
 #include "cc1101.h"
 #include <string.h>
 #include "nvs.h"
 #include "esp_log.h"
-#include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -41,6 +41,51 @@ static const pfx_model_t MODELS[] = {
 
 static pfx_ident_t s_id;
 
+/* Table persistante des moteurs enrôlés : chaque vraie télécommande (remote serial) est
+ * associée DÉFINITIVEMENT à un slot 0x067 + son compteur roulant. Sert d'allocateur sans
+ * conflit (un slot pris n'est jamais réattribué) et de rappel (remote connu -> même identité). */
+typedef struct __attribute__((packed)) {
+    uint32_t remote;    /* serial 28b de la vraie télécommande (clé) */
+    uint16_t counter;   /* compteur roulant courant de l'identité */
+    uint8_t  slot;      /* slot attribué [1,63] */
+} pfx_entry_t;
+#define PFX_MAP_MAX PFX_KEY_COUNT
+static pfx_entry_t s_map[PFX_MAP_MAX];
+static int         s_map_n;
+
+static void map_load(void) {
+    s_map_n = 0; memset(s_map, 0, sizeof(s_map));
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READONLY, &h) != ESP_OK) return;
+    size_t len = sizeof(s_map);
+    if (nvs_get_blob(h, "map", s_map, &len) == ESP_OK) s_map_n = (int)(len / sizeof(pfx_entry_t));
+    nvs_close(h);
+    if (s_map_n > PFX_MAP_MAX) s_map_n = PFX_MAP_MAX;
+}
+static void map_save(void) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_blob(h, "map", s_map, (size_t)s_map_n * sizeof(pfx_entry_t));
+    nvs_commit(h); nvs_close(h);
+}
+/* Prochain slot libre [1,63] : ni dans la table, ni celui de l'identité active courante
+ * (protège une identité pas encore dans la table). 0 si tous pris. */
+static uint8_t map_free_slot(void) {
+    for (uint8_t slot = 1; slot <= PFX_KEY_COUNT; slot++) {
+        bool taken = (s_id.active && (uint8_t)(s_id.idx + 1) == slot);
+        for (int i = 0; i < s_map_n && !taken; i++) if (s_map[i].slot == slot) taken = true;
+        /* exclut aussi les slots déjà utilisés par un volet virtuel (pas de conflit) */
+        if (!taken && shutters_virt_serial_used(((uint32_t)slot << 12) | PFX_FAMILY_MARKER)) taken = true;
+        if (!taken) return slot;
+    }
+    return 0;
+}
+static pfx_entry_t *map_find(uint32_t remote) {
+    if (!remote) return NULL;
+    for (int i = 0; i < s_map_n; i++) if (s_map[i].remote == remote) return &s_map[i];
+    return NULL;
+}
+
 int                pfx_enrol_model_count(void) { return N_MODELS; }
 const pfx_model_t *pfx_enrol_model(int id)     { return (id >= 0 && id < N_MODELS) ? &MODELS[id] : NULL; }
 
@@ -52,51 +97,95 @@ static void save(void) {
     nvs_set_u8(h, "idx", s_id.idx);
     nvs_set_u32(h, "serial", s_id.serial);
     nvs_set_u16(h, "counter", s_id.counter);
+    nvs_set_u64(h, "key", s_id.key);
+    nvs_set_u32(h, "remote", s_id.remote);
     nvs_commit(h); nvs_close(h);
+    /* garde le compteur de la table à jour pour cette télécommande (compteur roulant par identité) */
+    if (s_id.remote) {
+        pfx_entry_t *e = map_find(s_id.remote);
+        if (e && e->counter != s_id.counter) { e->counter = s_id.counter; map_save(); }
+    }
 }
 
 void pfx_enrol_init(void) {
     memset(&s_id, 0, sizeof(s_id));
+    map_load();
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READONLY, &h) == ESP_OK) {
-        uint8_t a = 0, m = 0, ix = 0; uint32_t sr = 0; uint16_t c = 0;
+        uint8_t a = 0, m = 0, ix = 0; uint32_t sr = 0, rem = 0; uint16_t c = 0; uint64_t key = 0;
         nvs_get_u8(h, "active", &a); nvs_get_u8(h, "model", &m); nvs_get_u8(h, "idx", &ix);
         nvs_get_u32(h, "serial", &sr); nvs_get_u16(h, "counter", &c);
+        nvs_get_u64(h, "key", &key); nvs_get_u32(h, "remote", &rem);
         nvs_close(h);
         s_id.active = a; s_id.model = (m < N_MODELS) ? m : 0; s_id.idx = ix;
-        s_id.serial = sr; s_id.counter = c;
+        s_id.serial = sr; s_id.counter = c; s_id.key = key; s_id.remote = rem;
+        /* compat : ancienne identité sans clé stockée -> re-dérive de la table. */
+        if (s_id.key == 0 && s_id.active)
+            pfx_key_for_serial(s_id.serial, &s_id.key, NULL);
     }
 }
 
 bool pfx_enrol_get(pfx_ident_t *out) { if (out) *out = s_id; return s_id.active; }
 
-int pfx_enrol_new_identity(int model) {
-    if (model < 0 || model >= N_MODELS) return -1;
-    /* Tire un slot au hasard dans [1,63] : serial = slot<<12 | 0x067, idx = slot-1. */
-    uint8_t slot = (uint8_t)(1 + (esp_random() % PFX_KEY_COUNT));
+/* Charge une identité (slot + compteur) comme identité courante et la persiste. */
+static void load_slot(uint8_t slot, uint16_t counter, int model, uint32_t remote) {
     uint32_t serial = ((uint32_t)slot << 12) | PFX_FAMILY_MARKER;
-    uint64_t key; uint8_t idx;
-    if (!pfx_key_for_serial(serial, &key, &idx)) return -1;   /* garde-fou */
-    s_id.active = true; s_id.model = model; s_id.idx = idx;
-    s_id.serial = serial; s_id.counter = 2;
+    uint64_t key = 0; uint8_t idx = (uint8_t)(slot - 1);
+    pfx_key_for_serial(serial, &key, &idx);
+    s_id.active = true;
+    s_id.model  = (model >= 0 && model < N_MODELS) ? model : s_id.model;
+    s_id.idx = idx; s_id.serial = serial; s_id.counter = counter; s_id.key = key; s_id.remote = remote;
     save();
-    ESP_LOGW(TAG, "nouvelle identite 0x067 serial=0x%07X slot=%u model=%s",
-             (unsigned)serial, slot, MODELS[model].name);
-    return idx;
 }
 
-void pfx_enrol_forget(void) { memset(&s_id, 0, sizeof(s_id)); save(); }
+int pfx_enrol_capture(uint32_t remote, int model, bool *is_new) {
+    if (is_new) *is_new = false;
+    if (!remote) return -2;
+    pfx_entry_t *e = map_find(remote);
+    if (e) {                                   /* moteur déjà connu -> même identité, compteur conservé */
+        uint32_t serial = ((uint32_t)e->slot << 12) | PFX_FAMILY_MARKER;
+        uint16_t cnt = e->counter;
+        uint16_t vc  = shutters_virt_counter_for_serial(serial);  /* compteur réellement émis par le volet */
+        if (vc > cnt) cnt = vc;                /* on repart TOUJOURS devant le moteur (jamais un rejeu) */
+        e->counter = cnt; map_save();
+        load_slot(e->slot, cnt, model, remote);
+        ESP_LOGW(TAG, "telecommande 0x%07X connue -> identite existante slot=%u serial=0x%07X cnt=%u",
+                 (unsigned)remote, e->slot, (unsigned)s_id.serial, cnt);
+        return 0;
+    }
+    if (s_map_n >= PFX_MAP_MAX) { ESP_LOGW(TAG, "table pleine : 63 identites deja prises"); return -1; }
+    uint8_t slot = map_free_slot();            /* moteur inconnu -> prochain slot libre */
+    if (!slot) { ESP_LOGW(TAG, "aucun slot libre"); return -1; }
+    s_map[s_map_n].remote = remote; s_map[s_map_n].counter = 2; s_map[s_map_n].slot = slot; s_map_n++;
+    map_save();                                /* mémorisé DÉFINITIVEMENT */
+    load_slot(slot, 2, model, remote);
+    if (is_new) *is_new = true;
+    ESP_LOGW(TAG, "telecommande 0x%07X inconnue -> nouvelle identite slot=%u serial=0x%07X (memorisee)",
+             (unsigned)remote, slot, (unsigned)s_id.serial);
+    return 0;
+}
+
+void pfx_enrol_forget(void) {
+    uint32_t sv = s_id.serial, rem = s_id.remote;
+    /* NE supprime PAS l'entrée de la table : slot ET compteur restent mémorisés définitivement.
+     * « Oublier » ne fait que désélectionner l'identité active ; ré-appuyer sur la télécommande
+     * la récupère avec son compteur (jamais remis à zéro) -> un moteur strict l'accepte toujours. */
+    if (rem) {                                 /* fige le dernier compteur avant de désélectionner */
+        pfx_entry_t *e = map_find(rem);
+        if (e && e->counter != s_id.counter) { e->counter = s_id.counter; map_save(); }
+    }
+    memset(&s_id, 0, sizeof(s_id)); save();
+    ESP_LOGW(TAG, "identite deselectionnee (etait 0x%07X, telecommande 0x%07X : compteur conserve)",
+             (unsigned)sv, (unsigned)rem);
+}
 
 /* rev4 : inverse les 4 bits du bouton (LSB-first sur l'air, fix anti-tamper). */
 static inline uint8_t rev4(uint8_t b) {
     return (uint8_t)(((b & 1) << 3) | ((b & 2) << 1) | ((b & 4) >> 1) | ((b & 8) >> 3));
 }
 
-/* Construit la trame 66 bits on-air ('0'/'1', out[66]=NUL) pour une identité 0x067.
- * Retourne 0 si serial valide (famille 0x067), -1 sinon. Public (cf. pfx_enrol.h). */
-int pfx_enrol_frame(uint32_t serial, uint8_t button, uint16_t counter, char out[68]) {
-    uint64_t key = 0;
-    if (!pfx_key_for_serial(serial, &key, NULL)) { out[0] = 0; return -1; }
+/* Cœur : construit la trame 66 bits on-air ('0'/'1', out[66]=NUL) pour un serial + une clé DONNÉE. */
+static void frame_with_key(uint32_t serial, uint64_t key, uint8_t button, uint16_t counter, char out[68]) {
     uint16_t discrim = (uint16_t)(serial & 0xFFF);
     uint32_t plain = ((uint32_t)(button & 0xF) << 28) | ((uint32_t)(discrim & 0xFFF) << 16) | counter;
     uint32_t enc = keeloq_encrypt(plain, key);
@@ -112,6 +201,13 @@ int pfx_enrol_frame(uint32_t serial, uint8_t button, uint16_t counter, char out[
     frame[8] = 0x40;                                       /* statut '01' = RPT=1 */
     for (int i = 0; i < 66; i++) out[i] = ((frame[i / 8] >> (7 - (i % 8))) & 1) ? '1' : '0';
     out[66] = 0;
+}
+
+/* Public : trame pour une identité 0x067 (clé lue dans la table). Utilisé par shutters. */
+int pfx_enrol_frame(uint32_t serial, uint8_t button, uint16_t counter, char out[68]) {
+    uint64_t key = 0;
+    if (!pfx_key_for_serial(serial, &key, NULL)) { out[0] = 0; return -1; }
+    frame_with_key(serial, key, button, counter, out);
     return 0;
 }
 
@@ -132,7 +228,7 @@ static uint32_t cfg_tx_te(void) {
 static int emit(uint8_t button, uint16_t counter) {
     if (!s_id.active) return -1;
     const pfx_model_t *m = &MODELS[s_id.model];
-    char bits[68]; pfx_enrol_frame(s_id.serial, button, counter, bits);
+    char bits[68]; frame_with_key(s_id.serial, s_id.key, button, counter, bits);
     uint32_t prev_te = cfg_tx_te();
     cc1101_set_tx_te(m->te_us);          /* TE du modèle le temps de la rafale */
     radio_tx(bits, PFX_BURST);           /* rafale, compteur figé sur toute la rafale */
@@ -149,7 +245,7 @@ int pfx_enrol_emit_learn(void) {
      * de 5 s d'un coup). Le moteur ne fait son va-et-vient de confirmation qu'après ~5 s. */
     const pfx_model_t *m = &MODELS[s_id.model];
     char bits[68];
-    pfx_enrol_frame(s_id.serial, BTN_LEARN, 3, bits);
+    frame_with_key(s_id.serial, s_id.key, BTN_LEARN, 3, bits);
     uint32_t prev_te = cfg_tx_te();
     cc1101_set_tx_te(m->te_us);
     for (int i = 0; i < PFX_LEARN_ROUNDS; i++) {
@@ -171,7 +267,10 @@ int pfx_enrol_cmd(const char *cmd) {
     else if (!strcmp(cmd, "stop")) b = PFX_BTN_STOP;
     else if (!strcmp(cmd, "down")) b = PFX_BTN_DOWN;
     else return -1;
-    int rc = emit(b, s_id.counter);
-    if (rc == 0) { s_id.counter++; save(); }
-    return rc;
+    /* Réserve-puis-émets : on persiste le PROCHAIN compteur AVANT d'émettre (jamais de rejeu
+     * au reboot ; au pire un compteur sauté, toléré par la fenêtre KeeLoq du moteur). */
+    uint16_t cnt = s_id.counter;
+    s_id.counter = cnt + 1;
+    save();
+    return emit(b, cnt);
 }

@@ -1,45 +1,55 @@
 #include "pfx_keys.h"
+#include "keeloq.h"
 
 /*
  * Cles fabricant Profalux stockees OBFUSQUEES (aucune valeur ici n'egale la cle
  * reelle, y compris l'index 0).
  *
- *   masque(i)  = PFX_OBF_SALT ^ (i * PFX_OBF_GOLDEN)      (mod 2^64)
+ *   masque(i)  = KeeLoq(seed_hi ^ i*prime, OBFK1)<<32 | KeeLoq(seed_lo ^ i*prime, OBFK2)
  *   stocke[i]  = cle_reelle[i] ^ masque(i)
  *   cle[i]     = stocke[i] ^ masque(i)                    (deobfuscation runtime)
  *
- * Obfuscation reversible : ne protege pas contre l'extraction par un attaquant
- * qui execute/emule le firmware, mais evite de livrer des cles en clair / greppables.
+ * Le masque est NON-LINEAIRE (deux KeeLoq 528 tours par index) : impossible a
+ * retrouver par simple XOR de constantes greppables. On ne deobfusque qu'une
+ * seule cle a la fois (l'index demande), jamais toute la table en RAM.
+ *
+ * Reste reversible pour qui execute/emule le firmware : c'est une obfuscation
+ * au repos, pas un secret cryptographique. On ne livre JAMAIS de cle en clair.
  */
-#define PFX_OBF_SALT   0xA5C3F00D5EED1234ULL
-#define PFX_OBF_GOLDEN 0x9E3779B97F4A7C15ULL
+#define PFX_OBFK1  0x1B7A4C2E93F5A681ULL
+#define PFX_OBFK2  0xC4E9D30F2A75B18CULL
+#define PFX_OBF_PRIME  0x01000193u
+#define PFX_OBF_SHI    0xA5A50000u
+#define PFX_OBF_SLO    0x5A5A5A5Au
 
 static const uint64_t _PFX_OBF[PFX_KEY_COUNT] = {
-    0x2a557662e1357485ULL, 0x0c3674acd9c81873ULL, 0x55fef0ed13163b21ULL,
-    0x7d35a1eb51b9ee86ULL, 0xd72a536e64017a60ULL, 0x0b1ede7d52602c47ULL,
-    0x0afadffedebf2ec6ULL, 0xd3fbff9809af45e7ULL, 0xf2ef2740ff5dba76ULL,
-    0x5bf88b12c6dacd1dULL, 0x66846b8b744cdfa9ULL, 0x963beb830df655baULL,
-    0x27b9fcd61bc4e8c8ULL, 0xc7f65bf81a778267ULL, 0x3ece6ed8ba24b874ULL,
-    0x5872284bd338f837ULL, 0xd59bde3adb0a4d40ULL, 0x0b0f888daaa2c2ebULL,
-    0x9d0623f838d1d58eULL, 0x56736d325294eb9bULL, 0x6ead7f892cf2f44cULL,
-    0x3bdda6008ff6f89eULL, 0x72b9483ee139830bULL, 0x3584e382ff26ebc4ULL,
-    0x8c3061b6ae2078e1ULL, 0xc2d7dc7ad5ebbf87ULL, 0x37e8ad12de70a691ULL,
-    0x159f773afffd2e89ULL, 0xe637776fa2ee8685ULL, 0x983056f5a841f72fULL,
-    0xd361d02b3bcf76b2ULL, 0x0bc620eed37ea343ULL, 0x83f7506cf843f3f4ULL,
-    0xf57e145cfcae7704ULL, 0x7b3be7aa02cc0094ULL, 0x179a71b97bea3823ULL,
-    0x3738523c6ed782dcULL, 0x4ee5519b439f2cbdULL, 0x78b941879283382dULL,
-    0x1a11d4628bf25b9cULL, 0x3de77b75d58a606bULL, 0x73923e9bf7554434ULL,
-    0xf31cf4fd0a8292e6ULL, 0xd3567fff84fc2765ULL, 0x5ae425094242c48bULL,
-    0xd0a16c2d22e52ffdULL, 0xcd4de01156f03da3ULL, 0x13fd6361505cd337ULL,
-    0xd0920865ef78882fULL, 0xe7ecb1ed69e4dbccULL, 0xc9df9212cb1ff42fULL,
-    0xf1e936df7cc30c40ULL, 0xe237997ffa95407cULL, 0x2515a7f46a5047caULL,
-    0x2a85c93b5d547ce5ULL, 0x0eef1af1a66f218bULL, 0x6e6cd28e1f1b3a29ULL,
-    0xd3c1b09797a5ff28ULL, 0xdaab331144444517ULL, 0x6477ecf751b1865cULL,
-    0xbe4ea470d5267029ULL, 0x9075424a1a4f8108ULL, 0x99d740a9bd3fa22cULL,
+    0xA4D87A18212ABBD3ULL,     0x66FC3402B786F87AULL,     0xE68DC12D255BC510ULL,
+    0xE37208B6ED66811DULL,     0x86245395FFC36BABULL,     0xCE4206992A2E788AULL,
+    0x8F3172C24954A14FULL,     0xF8D43DE0FF9A09ACULL,     0xEDF6D4E357EC9F89ULL,
+    0x90DDB2C3FA640217ULL,     0xDA57A47D5E61F6C3ULL,     0xCA2010C56F2A0C83ULL,
+    0xFF7AA4DF94617C30ULL,     0x0009DCBCAC0CEC81ULL,     0x0038E127D1DB1BF7ULL,
+    0x5359C4A1DBF8A2A9ULL,     0xC8BC2C2D08631C46ULL,     0xD31FA18A4DFEDF3AULL,
+    0xA83128C024D043B5ULL,     0xB64098EEFCFC5C7CULL,     0x66B4E8C103A63E5DULL,
+    0x49EFD391BF78BA0BULL,     0xC02A7CD958C1245CULL,     0x73C52416A55DA983ULL,
+    0xE35AF6CDC03B68EDULL,     0x16B7AD3204A6603EULL,     0x4F7108922F9A28B9ULL,
+    0x4B13AB79E9B4C271ULL,     0x0A92369587447165ULL,     0x79E797E127508A5AULL,
+    0x913895A16A916E69ULL,     0xB3C8EED93B035CDBULL,     0x7A871DA573459E60ULL,
+    0x86C31AFCACD61968ULL,     0xCC0A8748FBF74CC9ULL,     0x9F86A0E7C3D9272FULL,
+    0x0A846BFAF2E70AEAULL,     0x79AF70DB7CE32C71ULL,     0xA189A995DD8066A4ULL,
+    0x77DF3D7AA98164D6ULL,     0x7EC18EB2C41D6464ULL,     0x31E7071BEA7A8AF5ULL,
+    0x8DEE7F954CB98537ULL,     0xC0A8AAD5C8C3D69CULL,     0x8BC8C76C89E74243ULL,
+    0xF9549F513B81E1B7ULL,     0x43ECCDA69D808B50ULL,     0xD4C5F8C942253991ULL,
+    0x4CC467DD69550D40ULL,     0x152FB68923A7CE9FULL,     0xFEBCB715155F095DULL,
+    0x98B684682FB89F0EULL,     0x5625854712957BC4ULL,     0x862B709443849C5AULL,
+    0x12D6B2773DA73151ULL,     0x4638DD11BF354FDBULL,     0xEC4B1FDF31A5E0FEULL,
+    0xC8A38B1969D0F0D7ULL,     0x2558AD7C97D6BEC3ULL,     0xD5C7A22836E0A1C0ULL,
+    0xF82158A02D17D790ULL,     0x99E73F22946FB64FULL,     0x7A7DE82B37602F7DULL,
 };
 
 static inline uint64_t _pfx_mask(uint32_t i) {
-    return PFX_OBF_SALT ^ ((uint64_t)i * PFX_OBF_GOLDEN);
+    uint32_t hi = keeloq_encrypt(PFX_OBF_SHI ^ (i * PFX_OBF_PRIME), PFX_OBFK1);
+    uint32_t lo = keeloq_encrypt(PFX_OBF_SLO ^ (i * PFX_OBF_PRIME), PFX_OBFK2);
+    return ((uint64_t)hi << 32) | lo;
 }
 
 bool pfx_key_for_serial(uint32_t serial, uint64_t *out_key, uint8_t *out_idx) {

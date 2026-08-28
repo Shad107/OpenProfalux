@@ -7,8 +7,9 @@
  *     index = (serial >> 12) - 1     // dans [0,62]
  *     crypt_key = deobfuscation(index)  // table salee, cf pfx_keys.c
  *
- * Les cles sont stockees OBFUSQUEES (salt + melange par index) : AUCUNE valeur en
- * clair dans la source, y compris l'index 0. On ne livre JAMAIS de cle en clair.
+ * Les cles sont stockees OBFUSQUEES (masque non-lineaire KeeLoq par index) : AUCUNE
+ * valeur en clair dans la source, y compris l'index 0. On deobfusque une seule cle
+ * a la fois, jamais toute la table. On ne livre JAMAIS de cle en clair.
  */
 #ifndef PFX_KEYS_H
 #define PFX_KEYS_H

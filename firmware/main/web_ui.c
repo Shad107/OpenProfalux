@@ -43,6 +43,11 @@ static int8_t         s_lrssi;
 static volatile bool  s_lready;
 static volatile bool  s_lactive;
 
+/* ── Capture télécommande pour enrôlement PFX (appui télécommande -> serial -> identité) ── */
+static volatile bool     s_pcap_active, s_pcap_done;
+static volatile int      s_pcap_rc, s_pcap_new, s_pcap_model;
+static volatile uint32_t s_pcap_remote;
+
 static uint32_t bits_lsb(const char *b, int from, int len) {
     uint32_t v = 0;
     for (int i = 0; i < len; i++) if (b[from + i] == '1') v |= (1u << i);
@@ -514,13 +519,61 @@ static esp_err_t h_diag_tx(httpd_req_t *r) {   /* re-lance le self-test TX a la 
     return httpd_resp_sendstr(r, out);
 }
 
-/* ── /api/pfx : enrôlement d'une identité virtuelle 0x067 (expérimental, sans télécommande) ── */
+/* ── /api/pfx : enrôlement d'une identité virtuelle 0x067 ── */
+/* Capture RX de la vraie télécommande -> alloue/rappelle l'identité du moteur (tâche dédiée). */
+static void pfx_capture_task(void *arg) {
+    (void)arg;
+    char bits[SH_BITS_LEN];
+    ESP_LOGW(TAG, "PFX CAPTURE: ecoute RX 15s (appuie sur la telecommande)...");
+    int n = radio_listen_once(15000, bits, SH_BITS_LEN - 1);   /* 15 s pour appuyer */
+    ESP_LOGW(TAG, "PFX CAPTURE: radio_listen_once -> n=%d bits", n);
+    if (n >= 60) {
+        uint32_t rem = bits_lsb(bits, 32, 28);                 /* serial de la télécommande */
+        bool isnew = false;
+        s_pcap_rc     = pfx_enrol_capture(rem, s_pcap_model, &isnew);
+        s_pcap_remote = rem;
+        s_pcap_new    = isnew ? 1 : 0;
+        ESP_LOGW(TAG, "PFX CAPTURE: trame captee serial=0x%07X -> rc=%d new=%d", (unsigned)rem, s_pcap_rc, s_pcap_new);
+    } else {
+        s_pcap_rc = -3;   /* aucune trame captée */
+        s_pcap_remote = 0;
+        ESP_LOGW(TAG, "PFX CAPTURE: aucune trame captee (n=%d)", n);
+    }
+    s_pcap_done = true; s_pcap_active = false;
+    vTaskDelete(NULL);
+}
+static esp_err_t h_pfx_capture(httpd_req_t *r) {
+    char *body = read_body(r); if (!body) return httpd_resp_send_err(r, 400, "body");
+    cJSON *j = cJSON_Parse(body); free(body);
+    if (!j) return httpd_resp_send_err(r, 400, "json");
+    cJSON *mo = cJSON_GetObjectItem(j, "model");
+    s_pcap_model = cJSON_IsNumber(mo) ? (int)mo->valuedouble : -1;
+    cJSON_Delete(j);
+    ESP_LOGW(TAG, "PFX CAPTURE: requete recue (model=%d, active=%d)", s_pcap_model, s_pcap_active);
+    if (!s_pcap_active) {
+        s_pcap_done = false; s_pcap_rc = 0; s_pcap_remote = 0; s_pcap_new = 0; s_pcap_active = true;
+        BaseType_t ok = xTaskCreate(pfx_capture_task, "pfxcap", 4096, NULL, 6, NULL);
+        if (ok != pdPASS) { s_pcap_active = false; ESP_LOGE(TAG, "PFX CAPTURE: xTaskCreate ECHEC"); }
+    }
+    httpd_resp_set_type(r, "application/json");
+    return httpd_resp_sendstr(r, "{\"ok\":1}");
+}
+static esp_err_t h_pfx_capture_poll(httpd_req_t *r) {
+    pfx_ident_t id; pfx_enrol_get(&id);
+    char out[144];
+    snprintf(out, sizeof(out),
+        "{\"active\":%d,\"done\":%d,\"rc\":%d,\"new\":%d,\"remote\":\"0x%07X\",\"serial\":\"0x%07X\",\"counter\":%d}",
+        s_pcap_active ? 1 : 0, s_pcap_done ? 1 : 0, s_pcap_rc, s_pcap_new,
+        (unsigned)s_pcap_remote, (unsigned)id.serial, id.counter);
+    httpd_resp_set_type(r, "application/json");
+    return httpd_resp_sendstr(r, out);
+}
 static esp_err_t h_pfx_get(httpd_req_t *r) {
     pfx_ident_t id; bool active = pfx_enrol_get(&id);
     char out[720]; int p = 0;
     p += snprintf(out + p, sizeof(out) - p,
-                  "{\"active\":%d,\"model\":%d,\"serial\":\"0x%07X\",\"idx\":%d,\"counter\":%d,\"models\":[",
-                  active ? 1 : 0, id.model, (unsigned)id.serial, id.idx, id.counter);
+                  "{\"active\":%d,\"model\":%d,\"serial\":\"0x%07X\",\"idx\":%d,\"counter\":%d,\"remote\":\"0x%07X\",\"models\":[",
+                  active ? 1 : 0, id.model, (unsigned)id.serial, id.idx, id.counter, (unsigned)id.remote);
     int nm = pfx_enrol_model_count();
     for (int i = 0; i < nm; i++) {
         const pfx_model_t *m = pfx_enrol_model(i);
@@ -528,19 +581,6 @@ static esp_err_t h_pfx_get(httpd_req_t *r) {
                       i ? "," : "", m->name, m->te_us, m->routine);
     }
     snprintf(out + p, sizeof(out) - p, "]}");
-    httpd_resp_set_type(r, "application/json");
-    return httpd_resp_sendstr(r, out);
-}
-static esp_err_t h_pfx_new(httpd_req_t *r) {
-    char *body = read_body(r); if (!body) return httpd_resp_send_err(r, 400, "body");
-    cJSON *j = cJSON_Parse(body); free(body);
-    if (!j) return httpd_resp_send_err(r, 400, "json");
-    cJSON *mo = cJSON_GetObjectItem(j, "model");
-    int model = cJSON_IsNumber(mo) ? (int)mo->valuedouble : -1;
-    cJSON_Delete(j);
-    int idx = pfx_enrol_new_identity(model);
-    char out[48];
-    snprintf(out, sizeof(out), "{\"ok\":%d,\"idx\":%d}", idx >= 0 ? 1 : 0, idx);
     httpd_resp_set_type(r, "application/json");
     return httpd_resp_sendstr(r, out);
 }
@@ -631,7 +671,8 @@ void web_ui_start(void) {
     reg(s, "/api/restore",      HTTP_POST, h_restore);
     reg(s, "/api/mqtt/discover", HTTP_GET, h_mqtt_discover);
     reg(s, "/api/pfx",        HTTP_GET,  h_pfx_get);
-    reg(s, "/api/pfx/new",    HTTP_POST, h_pfx_new);
+    reg(s, "/api/pfx/capture", HTTP_POST, h_pfx_capture);
+    reg(s, "/api/pfx/capture/poll", HTTP_GET, h_pfx_capture_poll);
     reg(s, "/api/pfx/learn",  HTTP_POST, h_pfx_learn);
     reg(s, "/api/pfx/cmd",    HTTP_POST, h_pfx_cmd);
     reg(s, "/api/pfx/forget", HTTP_POST, h_pfx_forget);
