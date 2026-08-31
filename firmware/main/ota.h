@@ -37,6 +37,11 @@ esp_err_t ota_upload_data(const void *data, size_t len);
 esp_err_t ota_upload_end(void);
 esp_err_t ota_upload_abort(void);
 esp_err_t ota_pull_from_url(const char *url);   /* telecharge + flashe une image HTTPS (release GitHub) */
-esp_err_t ota_pull_from_url(const char *url);
+
+/* Interroge GitHub (releases/latest) -> derniere version + URL d'asset de la variante.
+ * Renseigne ota_latest_version()/ota_latest_url(). Reseau bloquant (~s), a appeler hors tick. */
+esp_err_t   ota_check_github(void);
+const char *ota_latest_version(void);   /* "" si pas encore verifie */
+const char *ota_latest_url(void);       /* "" si pas encore verifie */
 esp_err_t ota_rollback(void);
 esp_err_t ota_mark_valid(void);

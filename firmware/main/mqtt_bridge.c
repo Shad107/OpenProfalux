@@ -36,7 +36,8 @@ static void handle_incoming(const char *topic, int tlen, const char *data, int d
     /* Cover HA + switch "Ecoute RF permanente" + repeuplement frames/log -> handler shutters */
     if (strncmp(t, TOPIC_BASE "/cover/", strlen(TOPIC_BASE "/cover/")) == 0
         || strncmp(t, TOPIC_BASE "/frames/log/", strlen(TOPIC_BASE "/frames/log/")) == 0
-        || strncmp(t, TOPIC_BASE "/listen/", strlen(TOPIC_BASE "/listen/")) == 0) {   /* set + state (restauration au boot) */
+        || strncmp(t, TOPIC_BASE "/listen/", strlen(TOPIC_BASE "/listen/")) == 0   /* set + state (restauration au boot) */
+        || strncmp(t, TOPIC_BASE "/update/", strlen(TOPIC_BASE "/update/")) == 0) {  /* install MAJ via HA */
         if (s_hdl.on_message) s_hdl.on_message(t, data, dlen);
         return;
     }
@@ -60,6 +61,7 @@ static void mqtt_event_cb(void *arg, esp_event_base_t base, int32_t id, void *ev
             esp_mqtt_client_subscribe(s_mqtt, TOPIC_BASE "/cover/+/set", 1);
             esp_mqtt_client_subscribe(s_mqtt, TOPIC_BASE "/cover/+/set_position", 1);
             esp_mqtt_client_subscribe(s_mqtt, TOPIC_BASE "/ota/pull", 1);
+            esp_mqtt_client_subscribe(s_mqtt, TOPIC_BASE "/update/install", 1);   /* entite update HA */
             /* PAS d'abonnement a frames/log/# : le ring est deja persiste en SPIFFS (load_ring au boot).
              * S'y abonner = l'ESP s'auto-inonde de ses propres trames retained (jeu qui grossit sans fin)
              * au boot -> la tache MQTT traite ce flot en prenant le LOCK pendant que la discovery publie

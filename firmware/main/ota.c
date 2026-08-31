@@ -2,7 +2,9 @@
  * OpenProfalux - OTA (repris d'OpenXtraflame, éprouvé au terrain).
  */
 #include <string.h>
+#include <stdlib.h>
 #include "ota.h"
+#include "hardware_config.h"   /* TARGET_NAME -> variante d'asset GitHub */
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_app_desc.h"
@@ -127,6 +129,54 @@ esp_err_t ota_pull_from_url(const char *url)
     vTaskDelay(pdMS_TO_TICKS(3000));
     esp_restart();
     return ESP_OK;
+}
+
+/* ── Check GitHub : derniere version + URL d'asset de la variante ── */
+static char s_latest_ver[24] = "";
+static char s_latest_url[192] = "";
+const char *ota_latest_version(void) { return s_latest_ver; }
+const char *ota_latest_url(void)     { return s_latest_url; }
+
+esp_err_t ota_check_github(void)
+{
+    esp_http_client_config_t cfg = {
+        .url = "https://api.github.com/repos/Shad107/OpenProfalux/releases/latest",
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .timeout_ms = 10000, .buffer_size = 4096, .buffer_size_tx = 1024,
+        .user_agent = "OpenProfalux-OTA",   /* l'API GitHub exige un User-Agent */
+    };
+    esp_http_client_handle_t c = esp_http_client_init(&cfg);
+    if (!c) return ESP_FAIL;
+    esp_err_t err = esp_http_client_open(c, 0);
+    if (err != ESP_OK) { esp_http_client_cleanup(c); return err; }
+    esp_http_client_fetch_headers(c);
+    char *buf = malloc(6144);
+    if (!buf) { esp_http_client_close(c); esp_http_client_cleanup(c); return ESP_ERR_NO_MEM; }
+    int total = 0, r;
+    while (total < 6143 && (r = esp_http_client_read(c, buf + total, 6143 - total)) > 0) total += r;
+    buf[total > 0 ? total : 0] = 0;
+    esp_http_client_close(c); esp_http_client_cleanup(c);
+    /* tag_name arrive tot dans le JSON -> recherche legere (pas de gros parse). URL par convention. */
+    esp_err_t rc = ESP_FAIL;
+    char *t = strstr(buf, "\"tag_name\":\"");
+    if (t) {
+        t += strlen("\"tag_name\":\"");
+        char *e = strchr(t, '"');
+        if (e && (e - t) < 20) {
+            char tag[24]; size_t nn = (size_t)(e - t); memcpy(tag, t, nn); tag[nn] = 0;
+            strlcpy(s_latest_ver, tag[0] == 'v' ? tag + 1 : tag, sizeof(s_latest_ver));
+            const char *variant = !strcmp(TARGET_NAME, "m5stack_atom") ? "atom"
+                                : !strcmp(TARGET_NAME, "external")     ? "devkit" : NULL;
+            if (variant) {
+                snprintf(s_latest_url, sizeof(s_latest_url),
+                    "https://github.com/Shad107/OpenProfalux/releases/download/%s/openprofalux-%s-ota.bin", tag, variant);
+                rc = ESP_OK;
+            }
+        }
+    }
+    free(buf);
+    ESP_LOGI(TAG, "GitHub latest=%s url=%s", s_latest_ver, s_latest_url[0] ? s_latest_url : "(?)");
+    return rc;
 }
 
 esp_err_t ota_rollback(void)   { return esp_ota_mark_app_invalid_rollback_and_reboot(); }

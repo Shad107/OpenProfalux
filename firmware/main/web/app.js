@@ -42,6 +42,7 @@ function applyRoute() {
   if (sub === 'rf') { if (typeof loadRf === 'function') loadRf(true); if (typeof loadFrames === 'function') loadFrames(); }
   if (sub === 'calib' && !calibLive && typeof fillCalib === 'function') fillCalib();   /* affiche les temps enregistres */
   if (sub === 'enrol' && typeof loadPfx === 'function') loadPfx();
+  if (sub === 'radio' && typeof loadDiag === 'function') loadDiag();
 }
 /* Rafraichit la 1re page quand l'onglet RF est actif ET qu'on n'a pas defile (sinon on garde la position). */
 setInterval(() => { if ((location.hash || '').includes('/rf') && typeof loadRf === 'function' && rfOffset <= RF_PAGE) loadRf(true); }, 5000);
@@ -92,16 +93,20 @@ function renderVolets(list, rf) {
    * vraie telecommande desynchronise l'estimation (pas de retour moteur) et un % faux
    * est pire qu'aucun %. */
   const showPos = !!statusCache.listening;
-  for (const v of list) {
+  const ordered = [...list].sort((a, b) => (b.central ? 1 : 0) - (a.central ? 1 : 0));   /* centrales en 1er */
+  for (const v of ordered) {
     const r = rssiForSerials(v.serials, rf);
     const el = document.createElement('div');
     el.className = 'card volet';
+    const isC = !!v.central;
+    const showP = showPos && !isC;
     el.innerHTML = `
-      <div class="top"><span class="name">🪟 ${esc(v.id)}</span>${showPos ? `<span class="pct">${v.position ?? '?'}%</span>` : ''}</div>
+      <div class="top"><span class="name">${isC ? '🎛' : '🪟'} ${esc(v.id)}${isC ? ' <span class="badge">centrale</span>' : ''}</span>${showP ? `<span class="pct">${v.position ?? '?'}%</span>` : ''}</div>
       <div class="dpad"><button data-cmd="up">▲</button><button data-cmd="stop">■</button><button data-cmd="down">▼</button></div>
-      ${showPos ? `<div class="slat" style="--p:${v.position ?? 50}"></div>` : ''}
-      <div class="serials">serials : ${(v.serials || []).map(s => `<code>${esc(remoteName(s))}</code>`).join(' ') || 'aucun'}
-        ${r != null ? `<span style="margin-left:6px">· reçu ${sig(r)}</span>` : ''}</div>`;
+      ${showP ? `<div class="slat" style="--p:${v.position ?? 50}"></div>` : ''}
+      <div class="serials">${isC
+        ? 'volets : ' + (esc(v.members || '') || 'aucun') + ' <span class="hint">(gérer dans Télécommandes -> Centrale)</span>'
+        : 'serials : ' + ((v.serials || []).map(s => `<code>${esc(remoteName(s))}</code>`).join(' ') || 'aucun') + (r != null ? `<span style="margin-left:6px">· reçu ${sig(r)}</span>` : '')}</div>`;
     el.querySelectorAll('[data-cmd]').forEach(b =>
       b.onclick = () => sendCmd({ id: v.id, cmd: b.dataset.cmd }, b));
     const slat = el.querySelector('.slat');
@@ -124,7 +129,7 @@ let activeVolet = '';   // volet selectionne pour l'apprentissage
 
 function renderVoletPicker() {
   const box = $('#volet-picker'); if (!box) return;
-  const ids = (statusCache.volets || []).map(v => v.id);
+  const ids = (statusCache.volets || []).filter(v => !v.central).map(v => v.id);   /* pas d'apprentissage pour une centrale */
   const nr = $('#new-volet-row');
   const newOpen = nr && !nr.hidden;
   if (activeVolet && !ids.includes(activeVolet) && !newOpen) activeVolet = '';
@@ -147,8 +152,12 @@ function renderLearnSlots() {
   const box = $('#learn-slots'); if (!box) return;
   const id = activeVolet;
   const v = (statusCache.volets || []).find(x => x.id === id);
+  if (v && v.central) {   // une centrale n'a pas de télécommande propre
+    box.innerHTML = `<div class="statline ok"><span class="dot"></span><b>C'est une centrale</b> (groupe de volets) - pas d'apprentissage. Gère ses membres dans <b>Volets → Créer une centrale</b>.</div>`;
+    return;
+  }
   if (v && v.virt) {   // volet enrôlé (télécommande virtuelle) -> pas d'apprentissage/clonage
-    box.innerHTML = `<div class="statline ok"><span class="dot"></span><b>Ce volet a une télécommande virtuelle.</b> Pas de clonage nécessaire — il est piloté par génération. Gère-le dans <b>Créer une télécommande</b>.</div>`;
+    box.innerHTML = `<div class="statline ok"><span class="dot"></span><b>Ce volet a une télécommande virtuelle.</b> Pas de clonage nécessaire - il est piloté par génération. Gère-le dans <b>Créer une télécommande</b>.</div>`;
     return;
   }
   const cmd = (v && v.cmd) || {};
@@ -417,10 +426,10 @@ if ($('#pfx-capture')) $('#pfx-capture').onclick = async () => {
   clearInterval(timer);
   b.disabled = false; b.textContent = o; setRadioBusy(false);
   if (!d || !d.done) pfxCapStatus('Aucune réponse du boîtier', 'bad');
-  else if (d.rc === 0 && d.new) { pfxCapStatus(`✅ Nouveau moteur — identité ${d.serial} attribuée (télécommande ${d.remote})`, 'ok'); pfxResetSteps(); }
-  else if (d.rc === 0) pfxCapStatus(`✅ Moteur déjà connu — même identité ${d.serial} (télécommande ${d.remote})`, 'ok');
+  else if (d.rc === 0 && d.new) { pfxCapStatus(`✅ Nouveau moteur - identité ${d.serial} attribuée (télécommande ${d.remote})`, 'ok'); pfxResetSteps(); }
+  else if (d.rc === 0) pfxCapStatus(`✅ Moteur déjà connu - même identité ${d.serial} (télécommande ${d.remote})`, 'ok');
   else if (d.rc === -1) pfxCapStatus('⚠️ 63 identités déjà attribuées : oublie-en une pour libérer un slot.', 'bad');
-  else if (d.rc === -3) pfxCapStatus("⏱ Aucune trame captée — réessaie en appuyant sur la télécommande.", 'bad');
+  else if (d.rc === -3) pfxCapStatus("⏱ Aucune trame captée - réessaie en appuyant sur la télécommande.", 'bad');
   else pfxCapStatus('Télécommande non reconnue', 'bad');
   await loadPfx();
 };
@@ -435,13 +444,13 @@ if ($('#pfx-learn')) $('#pfx-learn').onclick = async () => {
   const after = $('#pfx-after-emit');
   if (after) after.hidden = true;                          // cache les gestes PENDANT l'émission
   setRadioBusy(true); b.disabled = true; const o = b.textContent; b.textContent = '📡 Émission…';
-  let n = 5; pfxStatus('⏳ Émission ~5 s — ne touche à rien… ' + n + ' s');
-  const timer = setInterval(() => { n = Math.max(0, n - 1); pfxStatus('⏳ Émission ~5 s — ne touche à rien… ' + n + ' s'); }, 1000);
+  let n = 5; pfxStatus('⏳ Émission ~5 s - ne touche à rien… ' + n + ' s');
+  const timer = setInterval(() => { n = Math.max(0, n - 1); pfxStatus('⏳ Émission ~5 s - ne touche à rien… ' + n + ' s'); }, 1000);
   try {
     const r = await api('/api/pfx/learn', { method: 'POST' });
     clearInterval(timer);
     if (r && r.ok) {
-      pfxStatus('✅ Émission finie — fais les gestes ci-dessous MAINTENANT.', 'ok');
+      pfxStatus('✅ Émission finie - fais les gestes ci-dessous MAINTENANT.', 'ok');
       if (after) after.hidden = false;                     // révèle les gestes SEULEMENT à la fin
     } else pfxStatus('Échec (radio occupée ?)', 'bad');
   }
@@ -463,7 +472,7 @@ if ($('#pfx-save-volet')) $('#pfx-save-volet').onclick = async () => {
   if (!name) { toast('Donne un nom au volet'); return; }
   const r = await api('/api/pfx/save_volet', { method: 'POST', body: JSON.stringify({ id: name }) }).catch(() => null);
   if (r && r.ok) {
-    toast('Volet créé — voir l’onglet Volets');
+    toast('Volet créé - voir l’onglet Volets');
     $('#pfx-volet-name').value = '';
     await loadPfx();                       // l'identité a migré vers le volet
     if (typeof loadStatus === 'function') await loadStatus();
@@ -531,21 +540,39 @@ if ($('#rxcal-btn')) $('#rxcal-btn').onclick = async () => {
   }, 1000);
 };
 async function loadDiag() {
-  const el = $('#diag-line'); if (!el) return;
+  const vd = $('#diag-verdict'), el = $('#diag-line'); if (!vd && !el) return;
   const d = await api('/api/diag').catch(() => null);
-  if (!d) { el.textContent = 'indisponible'; return; }
+  if (!d) { if (vd) vd.querySelector('b').textContent = 'Diagnostic indisponible'; if (el) el.textContent = ''; return; }
   const ph = '0x' + Number(d.partnum).toString(16).toUpperCase().padStart(2, '0');
   const vh = '0x' + Number(d.version).toString(16).toUpperCase().padStart(2, '0');
   const chipOk = (d.partnum === 0 && d.version !== 0 && d.version !== 255);
-  const chip = chipOk ? `détectée (PARTNUM ${ph} · VERSION ${vh})` : `NON détectée (${ph}/${vh}) — vérifie SPI/câblage`;
-  const tx = d.tx_ok === 1 ? 'OK ✓' : (d.tx_ok === 0 ? 'HS ✗ — la puce ne passe pas en émission' : 'non testé');
-  el.innerHTML = `Puce CC1101 : ${chip}<br>Émission (TX) : <b>${tx}</b><br>Réception (RX) : les trames reçues apparaissent dans l'onglet RF (si oui = RX OK)`;
+  const txOk = d.tx_ok === 1;
+  if (vd) {
+    let cls, msg;
+    if (!chipOk) { cls = 'bad'; msg = '🔴 Module NON détecté (câblage / SPI). VERSION=' + vh; }
+    else if (!txOk) { cls = 'bad'; msg = '🔴 Détecté mais émission KO (TX HS)'; }
+    else { cls = 'ok'; msg = '🟢 Module OK (détecté + émission)'; }
+    vd.className = 'statline ' + cls; vd.querySelector('b').textContent = msg;
+  }
+  if (el) el.innerHTML = `PARTNUM ${ph} · VERSION ${vh} · TX ${txOk ? 'OK ✓' : (d.tx_ok === 0 ? 'HS ✗' : 'non testé')}. Réception : bouton ci-dessous.`;
 }
 if ($('#diag-tx-btn')) $('#diag-tx-btn').onclick = async () => {
   const btn = $('#diag-tx-btn'); btn.disabled = true;
-  const el = $('#diag-line'); if (el) el.textContent = 'Test d\'émission en cours…';
+  const vd = $('#diag-verdict'); if (vd) vd.querySelector('b').textContent = 'Test d\'émission en cours...';
   await api('/api/diag/tx', { method: 'POST' }).catch(() => {});
   await loadDiag(); btn.disabled = false;
+};
+if ($('#diag-rx-btn')) $('#diag-rx-btn').onclick = async () => {
+  const btn = $('#diag-rx-btn'), st = $('#diag-rx-status');
+  btn.disabled = true; setRadioBusy(true);
+  st.className = 'hint'; st.textContent = '📡 Presse ta télécommande MAINTENANT (~15 s)...';
+  await api('/api/learn/start', { method: 'POST' }).catch(() => {});
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  let got = null;
+  for (let i = 0; i < 16; i++) { await wait(1000); const p = await api('/api/learn/poll').catch(() => null); if (p && p.serial && p.serial !== '0x0000000') { got = p; break; } }
+  btn.disabled = false; setRadioBusy(false);
+  if (got) st.innerHTML = `✅ Réception OK : serial <code>${esc(got.serial)}</code>, bouton 0x${esc(got.button)}, RSSI ${got.rssi} dBm. Module bien en 868 et qui reçoit.`;
+  else st.innerHTML = '❌ Rien capté en 15 s. Si TX est OK mais RX ne capte jamais, c\'est souvent la <b>mauvaise fréquence (433 au lieu de 868)</b>. Vérifie aussi antenne, distance < 1 m, gain RX.';
 };
 loadDiag();
 $('#mqtt-detect').onclick = async () => {
@@ -560,7 +587,7 @@ $('#mqtt-detect').onclick = async () => {
 /* ── OTA ── */
 $('#ota-btn').onclick = async () => {
   const f = $('#ota-file').files[0]; if (!f) return alert('Choisis un fichier .bin');
-  if (/full/i.test(f.name) && !confirm(`« ${f.name} » ressemble à un binaire COMPLET (flash série à 0x0), pas à une image OTA — l'OTA le refusera. Prends plutôt le fichier « -ota.bin ». Continuer quand même ?`)) return;
+  if (/full/i.test(f.name) && !confirm(`« ${f.name} » ressemble à un binaire COMPLET (flash série à 0x0), pas à une image OTA - l'OTA le refusera. Prends plutôt le fichier « -ota.bin ». Continuer quand même ?`)) return;
   $('#ota-prog').hidden = false; $('#ota-btn').disabled = true; $('#ota-bar').value = 0;
   /* Le httpd de l'ESP est mono-tache : pendant l'upload il ne peut PAS repondre a /api/ota/status.
      On pilote donc la barre cote navigateur (octets reellement pousses vers l'ESP) via XHR. */
@@ -575,7 +602,7 @@ $('#ota-btn').onclick = async () => {
   xhr.onload = () => {
     const ok = xhr.status >= 200 && xhr.status < 300;
     $('#ota-bar').value = ok ? 100 : $('#ota-bar').value;
-    $('#ota-msg').textContent = ok ? '✓ reçu — vérification + redémarrage (~5 s)…' : `✗ échec (HTTP ${xhr.status})`;
+    $('#ota-msg').textContent = ok ? '✓ reçu - vérification + redémarrage (~5 s)…' : `✗ échec (HTTP ${xhr.status})`;
     if (!ok) $('#ota-btn').disabled = false;
   };
   xhr.onerror = () => { $('#ota-msg').textContent = '✗ échec de l\'envoi (lien coupé ?)'; $('#ota-btn').disabled = false; };
@@ -603,7 +630,7 @@ $('#ota-check').onclick = async () => {
       : null;
     if (githubUrl) $('#ota-github').hidden = false;
     span.textContent = (cur && cur === latest) ? `✅ ${cur} = dernière version`
-      : !variant ? `⚠️ Disponible ${latest} — variante inconnue, utilise le flash manuel`
+      : !variant ? `⚠️ Disponible ${latest} - variante inconnue, utilise le flash manuel`
       : `⚠️ Installée ${cur}, disponible ${latest}${githubUrl ? '' : ' (pas d’asset OTA pour cette variante)'}`;
   } catch { span.textContent = '❌ Pas d’accès Internet ?'; }
 };
@@ -625,8 +652,8 @@ $('#ota-github').onclick = () => {
       let n = 15;
       const t = setInterval(async () => {
         const s = await api('/api/ota/status').catch(() => null);
-        if (s || --n <= 0) { clearInterval(t); $('#ota-msg').textContent = '✅ Mise à jour installée — rechargement…'; setTimeout(() => location.reload(), 900); }
-        else $('#ota-msg').textContent = `✅ Installée — redémarrage… reconnexion (${n})`;
+        if (s || --n <= 0) { clearInterval(t); $('#ota-msg').textContent = '✅ Mise à jour installée - rechargement…'; setTimeout(() => location.reload(), 900); }
+        else $('#ota-msg').textContent = `✅ Installée - redémarrage… reconnexion (${n})`;
       }, 1000);
     };
     const poll = setInterval(async () => {
@@ -655,7 +682,7 @@ $('#restore-btn').onclick = async () => {
 /* ── Statut global (polling) ── */
 let statusCache = { volets: [], rf: [], remotes: {} };
 function fillVoletPickers(volets) {
-  const ids = (volets || []).map(v => v.id);
+  const ids = (volets || []).filter(v => !v.central).map(v => v.id);   /* pas de calibration pour une centrale */
   const sel = $('#calib-id');
   if (sel) { const cur = sel.value; sel.innerHTML = ids.map(id => `<option>${esc(id)}</option>`).join(''); if (ids.includes(cur)) sel.value = cur; }
   const dl = $('#volet-list'); if (dl) dl.innerHTML = ids.map(id => `<option value="${esc(id)}">`).join('');
@@ -675,11 +702,57 @@ function mqttStatusLine(ok) {
   el.className = 'statline ' + (ok ? 'ok' : 'bad');
   el.innerHTML = `<span class="dot"></span><b>${ok ? 'Connecté' : 'Déconnecté'}</b>${ok ? '' : '<span class="r">aucun broker</span>'}`;
 }
+function renderCentralMembers() {
+  const box = $('#central-members'); if (!box) return;
+  const checked = new Set($$('#central-members input:checked').map(c => c.value));   /* garde les coches au re-render (polling) */
+  const vols = (statusCache.volets || []).filter(v => !v.central);
+  box.innerHTML = vols.length
+    ? vols.map(v => `<label class="chip" style="cursor:pointer"><input type="checkbox" value="${esc(v.id)}"${checked.has(v.id) ? ' checked' : ''} style="margin-right:5px">${esc(v.id)}</label>`).join('')
+    : '<span class="hint">Aucun volet à grouper pour l\'instant.</span>';
+}
+function renderCentralsList() {
+  const box = $('#central-list'); if (!box) return;
+  const centrals = (statusCache.volets || []).filter(v => v.central);
+  if (!centrals.length) { box.innerHTML = '<p class="hint">Aucune centrale pour l\'instant.</p>'; return; }
+  box.innerHTML = '<p class="hint" style="margin-bottom:6px">Clique une centrale pour la modifier ci-dessous.</p>' + centrals.map(v =>
+    `<div class="statline ce" data-id="${esc(v.id)}" style="cursor:pointer"><span class="dot"></span><b>🎛 ${esc(v.id)}</b> <span class="hint" style="margin-left:6px">${esc(v.members || 'aucun volet')}</span>
+     <span class="r"><button class="btn danger cd" data-id="${esc(v.id)}" style="padding:2px 9px">🗑</button></span></div>`).join('');
+  box.querySelectorAll('.ce').forEach(row => row.onclick = () => {
+    const v = (statusCache.volets || []).find(x => x.id === row.dataset.id); if (v) editCentral(v);
+  });
+  box.querySelectorAll('.cd').forEach(b => b.onclick = async (e) => {
+    e.stopPropagation();
+    if (!confirm(`Supprimer la centrale « ${b.dataset.id} » ? (les volets ne sont pas touchés)`)) return;
+    await api('/api/volet/delete', { method: 'POST', body: JSON.stringify({ id: b.dataset.id }) }).catch(() => {});
+    toast('Centrale supprimée'); await loadStatus();
+  });
+}
+function editCentral(v) {
+  location.hash = 'remotes/central';
+  $('#central-name').value = v.id;
+  renderCentralMembers();
+  const members = (v.members || '').split(',').map(s => s.trim()).filter(Boolean);
+  $$('#central-members input').forEach(c => { c.checked = members.includes(c.value); });
+}
+if ($('#central-cancel')) $('#central-cancel').onclick = () => {
+  $('#central-name').value = ''; $$('#central-members input').forEach(c => c.checked = false);
+};
+if ($('#central-create')) $('#central-create').onclick = async () => {
+  const name = ($('#central-name').value || '').trim();
+  if (!name) return toast('Donne un nom à la centrale');
+  const members = $$('#central-members input:checked').map(c => c.value);
+  if (!members.length) return toast('Coche au moins un volet');
+  const r = await api('/api/central', { method: 'POST', body: JSON.stringify({ id: name, members }) }).catch(() => null);
+  if (r && r.ok) { toast('Centrale enregistrée'); $('#central-name').value = ''; $$('#central-members input').forEach(c => c.checked = false); await loadStatus(); }
+  else toast('Échec de l\'enregistrement');
+};
 async function loadStatus() {
   const s = await api('/api/status').catch(() => ({ volets: [], rf: [], remotes: {} }));
   statusCache = s;
   const rf = s.rf || [];
   renderVolets(s.volets || [], rf);
+  renderCentralMembers();
+  renderCentralsList();
   fillVoletPickers(s.volets || []);
   if ((location.hash || '').includes('/calib') && !calibLive) fillCalib();   /* affiche les temps enregistres */
   if (!learning) { renderVoletPicker(); renderLearnSlots(); }
@@ -705,13 +778,13 @@ function buttonLabel(serial, buttonHex) {
 function rfRow(f) {
   const ts = f.t > 1600000000
     ? new Date(f.t * 1000).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    : '—';
+    : '-';
   const name = frameName(f.serial);
   const vid = voletForSerial(f.serial);   /* volet rattache -> lien qui le selectionne dans l'apprentissage */
   const nameCell = vid
-    ? `<a href="#remotes/learn" class="frame-link" data-volet="${esc(vid)}" title="${esc(f.serial)} — paramétrer ${esc(vid)}">${esc(name)}</a>`
+    ? `<a href="#remotes/learn" class="frame-link" data-volet="${esc(vid)}" title="${esc(f.serial)} - paramétrer ${esc(vid)}">${esc(name)}</a>`
     : (name !== f.serial
-        ? `<a href="#remotes/learn" title="${esc(f.serial)} — Télécommandes">${esc(name)}</a>`
+        ? `<a href="#remotes/learn" title="${esc(f.serial)} - Télécommandes">${esc(name)}</a>`
         : `<span class="m" title="télécommande non nommée">${esc(f.serial)}</span>`);
   const bl = buttonLabel(f.serial, f.button);
   const btnCell = bl ? `<span class="badge">${esc(bl)}</span>` : `<span class="badge m">0x${esc(f.button)}</span>`;
@@ -725,7 +798,7 @@ const RF_PAGE = 50;
 function updateRfFooter() {
   const f = $('#rf-footer'); if (!f) return;
   f.textContent = rfTotal
-    ? `${Math.min(rfOffset, rfTotal)} / ${rfTotal} trame(s)` + (rfOffset < rfTotal ? ' — défile pour charger la suite' : '')
+    ? `${Math.min(rfOffset, rfTotal)} / ${rfTotal} trame(s)` + (rfOffset < rfTotal ? ' - défile pour charger la suite' : '')
     : 'Aucune trame captée.';
 }
 async function loadRf(reset) {

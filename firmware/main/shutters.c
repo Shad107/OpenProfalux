@@ -22,6 +22,8 @@
 #include "radio.h"
 #include "hardware_config.h"
 #include "mqtt_bridge.h"
+#include "ota.h"
+#include "esp_app_desc.h"   /* esp_app_get_description()->version = version installee */
 #include "esp_wifi.h"
 #include "esp_netif.h"
 
@@ -41,6 +43,9 @@ typedef struct {
     uint32_t virt_serial;    /* serial 0x067 (contient le slot ; cle via pfx_key_for_serial) */
     uint16_t virt_counter;   /* compteur roulant courant */
     uint16_t virt_te;        /* TE d'emission du modele (415 FranciaFlex, 455 Profalux) */
+    /* Centrale virtuelle : diffuse ouvrir/fermer/stop a un groupe de volets membres (CSV d'ids). */
+    bool     central;
+    char     members[SH_MEMBERS_LEN];   /* "id1,id2,..." */
     uint32_t travel_up_ms, travel_down_ms;
     int   orientation;       /* azimut de la facade (0..359, -1 = non defini) : automatisations soleil HA */
     float position;          /* 0..100 */
@@ -196,6 +201,10 @@ static char *cfg_to_json(void) {
             cJSON_AddNumberToObject(o, "virt_serial", v->virt_serial);
             cJSON_AddNumberToObject(o, "virt_counter", v->virt_counter);
             cJSON_AddNumberToObject(o, "virt_te", v->virt_te);
+        }
+        if (v->central) {   /* centrale : liste des volets membres (CSV) */
+            cJSON_AddBoolToObject(o, "central", true);
+            cJSON_AddStringToObject(o, "members", v->members);
         }
         cJSON_AddItemToArray(vols, o);
     }
@@ -400,6 +409,10 @@ static void parse_cfg_json(cJSON *root) {
             v->virt_counter = (uint16_t)cJSON_GetNumberValue(cJSON_GetObjectItem(o, "virt_counter"));
             v->virt_te      = (uint16_t)cJSON_GetNumberValue(cJSON_GetObjectItem(o, "virt_te"));
         }
+        if (cJSON_IsTrue(cJSON_GetObjectItem(o, "central"))) {
+            v->central = true;
+            strlcpy(v->members, cJSON_GetStringValue(cJSON_GetObjectItem(o, "members")) ?: "", SH_MEMBERS_LEN);
+        }
     }
 }
 static void load_cfg(void) {
@@ -573,7 +586,7 @@ static void announce_one(volet_t *v) {
     const char *devname = (!s_device[0] || !strcmp(s_device, "openprofalux")) ? "OpenProfalux" : s_device;
     /* Position seulement si ecoute permanente (sinon % non fiable) */
     char pos[240] = "";
-    if (s_log_frames)
+    if (s_log_frames && !v->central)   /* une centrale n'a pas de position (juste ouvrir/fermer/stop) */
         snprintf(pos, sizeof(pos),
             "\"position_topic\":\"openprofalux/cover/%s/position\","
             "\"set_position_topic\":\"openprofalux/cover/%s/set_position\","
@@ -644,6 +657,24 @@ int shutters_cmd(const char *id, const char *cmd, int value) {
     if (!v) { ESP_LOGW(TAG, "CMD '%s' : volet '%s' introuvable", cmd, id ? id : "(null)"); UNLOCK(); return -1; }
     ESP_LOGW(TAG, "CMD %s '%s' (up=%dc stop=%dc down=%dc)", cmd, id,
              (int)strlen(v->up), (int)strlen(v->stop), (int)strlen(v->down));
+    if (v->central) {   /* centrale : diffuse la commande a chaque volet membre (CSV) */
+        char buf[SH_MEMBERS_LEN]; strlcpy(buf, v->members, sizeof(buf));
+        char *sv = NULL;
+        for (char *tok = strtok_r(buf, ",", &sv); tok; tok = strtok_r(NULL, ",", &sv)) {
+            while (*tok == ' ') tok++;
+            volet_t *m = find_volet(tok);
+            if (!m || m == v || m->central) continue;
+            if      (!strcmp(cmd, "up"))   { m->target = 0;   start_move(m, +1); }
+            else if (!strcmp(cmd, "down")) { m->target = 100; start_move(m, -1); }
+            else if (!strcmp(cmd, "stop")) { do_stop(m); }
+            publish_volet_state(m);
+        }
+        if (!strcmp(cmd, "up")) v->position = 0; else if (!strcmp(cmd, "down")) v->position = 100;
+        v->dir = 0;
+        publish_volet_state(v);
+        UNLOCK(); pub_flush();
+        return 0;
+    }
     /* position = % de FERMETURE (0 = ouvert/haut, 100 = ferme/bas). */
     if (!strcmp(cmd, "up"))        { v->target = 0;   start_move(v, +1); }   /* ouvrir : monter vers 0 */
     else if (!strcmp(cmd, "down")) { v->target = 100; start_move(v, -1); }   /* fermer : descendre vers 100 */
@@ -776,6 +807,23 @@ int shutters_create_virtual(const char *id, uint32_t serial, uint16_t counter, u
     return 0;
 }
 
+/* Cree/convertit une CENTRALE : commande diffusee a un groupe de volets (members_csv = "id1,id2,..."). */
+int shutters_create_central(const char *id, const char *members_csv) {
+    if (!id || !*id) return -1;
+    LOCK();
+    volet_t *v = get_or_create(id);
+    if (!v) { UNLOCK(); return -1; }
+    v->central = true; v->virt = false;
+    v->position = 50; v->dir = 0; v->target = -1;
+    strlcpy(v->members, members_csv ? members_csv : "", SH_MEMBERS_LEN);
+    save_cfg();
+    announce_one(v);
+    UNLOCK();
+    pub_flush();
+    ESP_LOGW(TAG, "centrale '%s' creee : membres=[%s]", id, v->members);
+    return 0;
+}
+
 /* Champs (bits + bouton) d'une action pour un volet. NULL si action inconnue. */
 static char *action_bits(volet_t *v, const char *a, uint8_t **btn) {
     if (!strcmp(a, "up"))   { *btn = &v->up_btn;   return v->up; }
@@ -895,8 +943,9 @@ static void track_shutter_position(const char *shex, uint8_t button) {
         } else if (v->down_btn && button == v->down_btn) {
             if (!v->own_move && v->dir != -1) track_move(v, -1);
         }
-        /* v->own_move : notre propre echo (meme serial rejoue) -> ignore */
-        break;
+        /* v->own_move : notre propre echo (meme serial rejoue) -> ignore.
+         * PAS de break : un meme serial (telecommande GENERALE) peut piloter plusieurs volets
+         * -> on met a jour l'etat de TOUS les volets qui portent ce serial (sync HA correcte). */
     }
 }
 
@@ -969,6 +1018,7 @@ int shutters_status_json(char *buf, int cap) {
         cJSON *o = cJSON_CreateObject();
         cJSON_AddStringToObject(o, "id", v->id);
         if (v->virt) cJSON_AddBoolToObject(o, "virt", true);   /* volet a telecommande virtuelle -> pas d'apprentissage */
+        if (v->central) { cJSON_AddBoolToObject(o, "central", true); cJSON_AddStringToObject(o, "members", v->members); }
         cJSON_AddNumberToObject(o, "position", (int)(v->position + 0.5f));
         cJSON_AddNumberToObject(o, "travel_up_ms", v->travel_up_ms);     /* pour reafficher la calibration dans l'UI */
         cJSON_AddNumberToObject(o, "travel_down_ms", v->travel_down_ms);
@@ -1051,12 +1101,43 @@ int shutters_import_json(const char *js) {
 }
 
 /* ── Integration Home Assistant (MQTT) ── */
+/* Etat de l'entite update HA : version installee + derniere version GitHub connue. */
+static void publish_update_state(void) {
+    if (!s_mqtt_ready) return;
+    const esp_app_desc_t *d = esp_app_get_description();
+    const char *inst = d ? d->version : "?";
+    const char *latest = ota_latest_version();
+    if (!latest || !latest[0]) latest = inst;   /* pas encore verifie -> aucune MAJ signalee */
+    char pl[288];
+    snprintf(pl, sizeof(pl),
+        "{\"installed_version\":\"%s\",\"latest_version\":\"%s\",\"title\":\"OpenProfalux\","
+        "\"release_url\":\"https://github.com/Shad107/OpenProfalux/releases\"}", inst, latest);
+    pub_defer("openprofalux/update/state", pl, 0, 1);
+}
+/* Decouverte HA de l'entite update (plateforme MQTT update, meme device "openprofalux"). */
+static void announce_update(void) {
+    if (!s_mqtt_ready) return;
+    char *pl = malloc(768); if (!pl) return;
+    const char *devname = (!s_device[0] || !strcmp(s_device, "openprofalux")) ? "OpenProfalux" : s_device;
+    snprintf(pl, 768,
+        "{\"name\":\"Firmware\",\"unique_id\":\"openprofalux_update\",\"object_id\":\"openprofalux_update\","
+        "\"device_class\":\"firmware\",\"state_topic\":\"openprofalux/update/state\","
+        "\"command_topic\":\"openprofalux/update/install\",\"payload_install\":\"INSTALL\","
+        "\"availability_topic\":\"openprofalux/%s/status\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\","
+        "\"device\":{\"identifiers\":[\"openprofalux\"],\"name\":\"%s\",\"manufacturer\":\"isno.fr\",\"model\":\"OpenProfalux\"}}",
+        s_device, devname);
+    pub_defer("homeassistant/update/openprofalux/config", pl, 1, 1);
+    free(pl);
+    publish_update_state();
+}
+
 void shutters_mqtt_announce(const char *device) {
     LOCK();
     strlcpy(s_device, (device && *device) ? device : "op", sizeof(s_device));
     s_mqtt_ready = true;
     for (int i = 0; i < s_nvolets; i++) announce_one(&s_volets[i]);
     announce_extras();           /* switch "Ecoute RF permanente" + capteur "Derniere trame" */
+    announce_update();           /* entite update HA (firmware) */
     UNLOCK();
     pub_flush();                 /* publie la decouverte HORS LOCK (anti-deadlock a la connexion) */
     /* NB : plus de flush en masse du ring ici. Les frames/log/<slot> sont QoS1 RETAINED
@@ -1074,6 +1155,16 @@ void shutters_mqtt_lost(void) {
 }
 
 void shutters_mqtt_on_message(const char *topic, const char *data, int len) {
+    /* Entite update HA : HA publie "INSTALL" -> on lance l'OTA de la derniere version connue. */
+    if (!strcmp(topic, "openprofalux/update/install")) {
+        if (ota_latest_url()[0]) {
+            ESP_LOGW(TAG, "HA -> installer MAJ %s : %s", ota_latest_version(), ota_latest_url());
+            ota_pull_from_url(ota_latest_url());   /* telecharge + reboot (rollback auto si echec) */
+        } else {
+            ESP_LOGW(TAG, "HA -> install demande mais aucune version GitHub connue");
+        }
+        return;
+    }
     /* Switch HA "Ecoute RF permanente" (commande) */
     if (!strcmp(topic, "openprofalux/listen/set")) {
         shutters_set_log_frames(len >= 2 && !strncasecmp(data, "ON", 2));   /* publie l'etat + re-annonce */
@@ -1153,6 +1244,17 @@ static void on_air(const char *bits, uint32_t serial, uint8_t button, uint32_t h
     shutters_on_rx(bits, serial, button, rssi, hop);
 }
 
+/* Verifie GitHub au demarrage puis toutes les 6 h, et republie l'etat de l'entite update HA.
+ * Tache dediee : ota_check_github() est bloquant (~s), a ne pas mettre dans tick_task. */
+static void update_check_task(void *arg) {
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(30000));   /* laisse WiFi + MQTT monter */
+    while (1) {
+        if (s_mqtt_ready) { ota_check_github(); publish_update_state(); pub_flush(); }
+        vTaskDelay(pdMS_TO_TICKS(6UL * 3600UL * 1000UL));   /* toutes les 6 h */
+    }
+}
+
 void shutters_init(void) {
     s_lock = xSemaphoreCreateMutex();
     load_cfg();
@@ -1160,6 +1262,7 @@ void shutters_init(void) {
     spiffs_mount();  /* stockage du ring RF (trop gros pour la NVS 16 Ko) */
     load_ring();     /* restaure les trames recentes rejouables (bits reconstruits) apres reboot */
     xTaskCreate(tick_task, "sh_tick", 4096, NULL, 5, NULL);
+    xTaskCreate(update_check_task, "sh_upd", 6144, NULL, 4, NULL);   /* check GitHub -> entite update HA */
     radio_init();
     radio_start(on_air);   /* tache radio prete (arbitre TX) */
     update_listening();    /* ecoute si des volets sont deja appris (suivi position) ou si capture ON */

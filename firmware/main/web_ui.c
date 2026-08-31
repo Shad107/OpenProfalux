@@ -604,6 +604,23 @@ static esp_err_t h_pfx_forget(httpd_req_t *r) {
     return httpd_resp_sendstr(r, "{\"ok\":1}");
 }
 /* Enregistre l'identite virtuelle enrolee comme volet (onglet Volets + cover HA). */
+/* Cree une centrale : {id, members:[id1,id2,...]} -> diffuse aux volets membres. */
+static esp_err_t h_central(httpd_req_t *r) {
+    char *body = read_body(r); if (!body) return httpd_resp_send_err(r, 400, "body");
+    cJSON *j = cJSON_Parse(body); free(body);
+    if (!j) return httpd_resp_send_err(r, 400, "json");
+    const char *id = jstr(j, "id");
+    char csv[SH_MEMBERS_LEN] = ""; int p = 0;
+    cJSON *mem = cJSON_GetObjectItem(j, "members"), *m;
+    if (cJSON_IsArray(mem)) cJSON_ArrayForEach(m, mem) {
+        const char *s = cJSON_GetStringValue(m);
+        if (s && *s && p < (int)sizeof(csv) - 1) p += snprintf(csv + p, sizeof(csv) - p, "%s%s", p ? "," : "", s);
+    }
+    int rc = (id && *id) ? shutters_create_central(id, csv) : -1;
+    cJSON_Delete(j);
+    httpd_resp_set_type(r, "application/json");
+    return httpd_resp_sendstr(r, rc == 0 ? "{\"ok\":1}" : "{\"ok\":0}");
+}
 static esp_err_t h_pfx_save_volet(httpd_req_t *r) {
     char *body = read_body(r); if (!body) return httpd_resp_send_err(r, 400, "body");
     cJSON *j = cJSON_Parse(body); free(body);
@@ -677,5 +694,6 @@ void web_ui_start(void) {
     reg(s, "/api/pfx/cmd",    HTTP_POST, h_pfx_cmd);
     reg(s, "/api/pfx/forget", HTTP_POST, h_pfx_forget);
     reg(s, "/api/pfx/save_volet", HTTP_POST, h_pfx_save_volet);
+    reg(s, "/api/central", HTTP_POST, h_central);
     ESP_LOGI(TAG, "HTTP UI demarree");
 }

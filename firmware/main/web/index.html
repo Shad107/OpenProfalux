@@ -44,6 +44,7 @@
       <nav class="subtabs">
         <button class="subtab active" data-s="learn">Cloner une télécommande</button>
         <button class="subtab" data-s="enrol">Créer une télécommande</button>
+        <button class="subtab" data-s="central">Centrale</button>
         <button class="subtab" data-s="calib">Calibration</button>
       </nav>
 
@@ -59,14 +60,26 @@
           <div id="learn-slots" class="slots"></div>
           <p class="hint" id="learn-serial"></p>
           <div class="field" id="orient-row" hidden>
-            <label>Orientation de la façade (azimut) — pour les automatisations soleil</label>
+            <label>Orientation de la façade (azimut) - pour les automatisations soleil</label>
             <div class="row" style="flex-wrap:nowrap"><input id="orient-input" type="number" min="0" max="359" placeholder="ex : 180 (sud)" style="flex:1;min-width:0">
             <button id="orient-save" class="btn">Enregistrer</button></div>
             <p class="hint">Nord = 0 · Est = 90 · Sud = 180 · Ouest = 270. Laisser vide = non défini.</p>
           </div>
           <div class="row" id="del-volet-row" hidden><button id="del-volet" class="btn danger">🗑 Supprimer ce volet</button></div>
           <p class="hint" id="learn-hint">Choisis un volet ci-dessus pour activer la capture. Place-toi à moins d'un mètre du boîtier et appuie une fois sur le bon bouton.</p>
-          <div class="statline" style="margin-top:14px"><span class="dot"></span><b>Le clonage ne pilote pas ton moteur ?</b> Certains moteurs refusent le rejeu (rolling code strict). Dans ce cas, <a href="#" id="goto-enrol"><b>crée une télécommande virtuelle</b></a> — ça nécessite aussi ta télécommande d'origine.</div>
+          <div class="statline" style="margin-top:14px"><span class="dot"></span><b>Le clonage ne pilote pas ton moteur ?</b> Certains moteurs refusent le rejeu (rolling code strict). Dans ce cas, <a href="#" id="goto-enrol"><b>crée une télécommande virtuelle</b></a> - ça nécessite aussi ta télécommande d'origine.</div>
+        </div>
+      </div>
+
+      <div class="subpanel" data-sp="central">
+        <div class="card">
+          <h2>Centrale (groupe de volets)</h2>
+          <p class="sub">Une centrale diffuse ouvrir / fermer / stop à plusieurs volets d'un coup, comme une télécommande générale. Elle apparaît comme un volet et en cover Home Assistant.</p>
+          <div id="central-list"></div>
+          <h3>Nouvelle centrale (ou édition)</h3>
+          <div class="field"><label>Nom</label><input id="central-name" placeholder="ex : Tous les volets"></div>
+          <div class="field"><label>Volets pilotés</label><div id="central-members" class="chips"></div></div>
+          <div class="row"><button id="central-create" class="btn primary">Enregistrer la centrale</button><button id="central-cancel" class="btn">Annuler</button></div>
         </div>
       </div>
 
@@ -91,7 +104,7 @@
 
       <div class="subpanel" data-sp="enrol">
         <div class="card">
-          <div class="statline"><span class="dot"></span><b>À utiliser si le clonage ne pilote pas ton moteur.</b> On crée une nouvelle télécommande virtuelle et on l'apprend au moteur. <b>Nécessite ta télécommande d'origine</b> (pour le geste de validation). Appuie dessus : le boîtier l'identifie et attribue une identité — <b>nouvelle</b> si le moteur est inconnu, <b>la même</b> s'il est déjà connu.</div>
+          <div class="statline"><span class="dot"></span><b>À utiliser si le clonage ne pilote pas ton moteur.</b> On crée une nouvelle télécommande virtuelle et on l'apprend au moteur. <b>Nécessite ta télécommande d'origine</b> (pour le geste de validation). Appuie dessus : le boîtier l'identifie et attribue une identité - <b>nouvelle</b> si le moteur est inconnu, <b>la même</b> s'il est déjà connu.</div>
           <h2>Créer une télécommande virtuelle</h2>
           <div class="field"><label>Modèle de moteur</label><select id="pfx-model"></select></div>
           <div class="row"><button id="pfx-capture" class="btn primary">📡 Appuie sur ta télécommande d'origine</button></div>
@@ -103,7 +116,7 @@
             <div class="row"><button id="pfx-learn" class="btn primary">📡 Émettre la trame d'apprentissage (~5 s)</button></div>
             <div class="statline" id="pfx-learn-status" hidden><span class="dot"></span><b></b></div>
             <div id="pfx-after-emit" hidden>
-              <p class="sub"><b>✅ Émission finie — fais MAINTENANT sur ta télécommande d'origine :</b></p>
+              <p class="sub"><b>✅ Émission finie - fais MAINTENANT sur ta télécommande d'origine :</b></p>
               <ol class="steps" id="pfx-gestures"></ol>
             </div>
             <h3>2. Tester la nouvelle identité</h3>
@@ -170,6 +183,7 @@
     <section class="panel" data-p="sys">
       <nav class="subtabs">
         <button class="subtab active" data-s="device">Appareil</button>
+        <button class="subtab" data-s="radio">Radio</button>
         <button class="subtab" data-s="backup">Sauvegarde</button>
         <button class="subtab" data-s="rf">RF (debug)</button>
       </nav>
@@ -182,28 +196,34 @@
             <span class="lbl">Écoute RF permanente<small>Active le RF debug en direct, le suivi de position via la vraie télécommande et le dataset MQTT. Désactivée = radio libre (moins de bruit).</small></span></label>
           <label class="switch"><input type="checkbox" id="sys-debug"><span class="track"></span>
             <span class="lbl">Debug console<small>Logge chaque capture RX dans la console série (symboles, RSSI, bits, KeeLoq ou non). Pour diagnostiquer « ça ne capte pas ». À laisser OFF en usage normal (verbeux).</small></span></label>
-          <div class="field" style="margin-top:12px"><label>Gain RX (AGCCTRL2) — réglage de diagnostic réception</label>
+          <div class="field" style="margin-top:12px"><label>Gain RX (AGCCTRL2) - réglage de diagnostic réception</label>
             <select id="sys-rxgain">
-              <option value="7">0x07 — gain max (le plus sensible, mais capte le bruit)</option>
-              <option value="39">0x27 — défaut (-9 dB)</option>
-              <option value="47">0x2F — gain réduit</option>
-              <option value="55">0x37 — gain réduit +</option>
-              <option value="63">0x3F — mordant (-17 dB) : si démod bruitée sur signal fort</option>
+              <option value="7">0x07 - gain max (le plus sensible, mais capte le bruit)</option>
+              <option value="39">0x27 - défaut (-9 dB)</option>
+              <option value="47">0x2F - gain réduit</option>
+              <option value="55">0x37 - gain réduit +</option>
+              <option value="63">0x3F - mordant (-17 dB) : si démod bruitée sur signal fort</option>
             </select>
             <p class="hint" style="margin-top:8px"><button id="rxcal-btn" class="btn" type="button">Calibrer la réception (auto)</button>
               <span id="rxcal-status" style="margin-left:8px"></span></p>
             <p class="hint">Clique, puis <b>appuie en continu / répète les appuis</b> sur ta télécommande à moins d'1 m pendant tout le test (~25 s) : le boîtier teste chaque gain 6 s et verrouille le bon dès qu'il capte une trame valide. Presse à chaque changement de valeur affiché.</p></div>
-          <div class="field" style="margin-top:12px"><label>TE d'émission (µs) — timing radio du rejeu</label>
+          <div class="field" style="margin-top:12px"><label>TE d'émission (µs) - timing radio du rejeu</label>
             <input id="sys-txte" type="number" min="200" max="900" step="1" placeholder="455">
             <p class="hint"><b>Auto-réglé à l'apprentissage</b> : le boîtier mesure le tempo de ta télécommande et cale l'émission dessus (Profalux ≈ 455, FranciaFlex ≈ 415). Ce champ n'est qu'un <b>override manuel</b> si besoin.</p></div>
           <label class="switch"><input type="checkbox" id="sys-reboot"><span class="track"></span>
             <span class="lbl">Redémarrer après enregistrement</span></label>
           <div class="row end"><button id="sys-save" class="btn primary">Enregistrer</button></div>
         </div>
+      </div>
+
+      <div class="subpanel" data-sp="radio">
         <div class="card">
           <h2>Diagnostic radio</h2>
-          <p class="hint" id="diag-line">Chargement…</p>
-          <div class="row end"><button id="diag-tx-btn" class="btn" type="button">Re-tester l'émission (TX)</button></div>
+          <div class="statline" id="diag-verdict"><span class="dot"></span><b>Chargement...</b></div>
+          <p class="hint" id="diag-line"></p>
+          <div class="row"><button id="diag-tx-btn" class="btn" type="button">Re-tester l'émission (TX)</button><button id="diag-rx-btn" class="btn" type="button">Tester la réception (presse ta télécommande)</button></div>
+          <p class="hint" id="diag-rx-status" style="margin-top:8px"></p>
+          <p class="hint">La puce est détectée mais rien ne se capte ? Vérifie que ton module est bien en <b>868 MHz</b> (pas 433), l'antenne, et ajuste le <b>gain RX</b> / la calibration dans <b>Système -> Appareil</b>.</p>
         </div>
       </div>
 

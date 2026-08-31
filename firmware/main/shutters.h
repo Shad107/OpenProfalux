@@ -9,7 +9,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define SH_MAX_VOLETS   8
+#define SH_MAX_VOLETS   24
+#define SH_MEMBERS_LEN  384   /* CSV d'ids de volets membres d'une centrale */
 #define SH_MAX_SERIALS  4
 #define SH_BITS_LEN     72   /* 66 bits + marge + NUL */
 #define SH_ID_LEN       24
@@ -27,6 +28,9 @@ int  shutters_learn_assign(const char *id, const char *action, const char *bits)
 /* Cree un volet "virtuel PFX" a partir d'une identite 0x067 enrolee (pilote par generation,
  * pas rejeu) : apparait dans l'onglet Volets + cover HA. Retourne 0 si OK. */
 int  shutters_create_virtual(const char *id, uint32_t serial, uint16_t counter, uint16_t te);
+/* Cree une "centrale" virtuelle : une commande (ouvrir/fermer/stop) diffusee a un GROUPE de
+ * volets. members_csv = ids de volets separes par des virgules. Apparait en cover HA. */
+int  shutters_create_central(const char *id, const char *members_csv);
 int  shutters_reassign(const char *id, const char *from, const char *to);
 
 /* Calibration : temps de course. */
