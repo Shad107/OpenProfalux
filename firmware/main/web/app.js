@@ -607,15 +607,39 @@ $('#ota-check').onclick = async () => {
       : `⚠️ Installée ${cur}, disponible ${latest}${githubUrl ? '' : ' (pas d’asset OTA pour cette variante)'}`;
   } catch { span.textContent = '❌ Pas d’accès Internet ?'; }
 };
-$('#ota-github').onclick = async () => {
-  if (!githubUrl || !confirm('Installer la dernière version depuis GitHub et redémarrer ?')) return;
-  $('#ota-prog').hidden = false; $('#ota-github').disabled = true; $('#ota-msg').textContent = 'téléchargement…';
-  await api('/api/ota/pull', { method: 'POST', body: JSON.stringify({ url: githubUrl }) }).catch(() => {});
-  const poll = setInterval(async () => {
-    const s = await api('/api/ota/status').catch(() => null);
-    if (s) { $('#ota-bar').value = s.total ? Math.round(100 * s.written / s.total) : 0; $('#ota-msg').textContent = s.msg || 'en cours…'; }
-    if (s && (s.state === 4 || s.state === 99)) clearInterval(poll);
-  }, 800);
+$('#ota-github').onclick = () => {
+  if (!githubUrl) return;
+  /* Confirmation IN-PAGE (pas d'alert natif) : on affiche un avertissement + 2 boutons. */
+  $('#ota-prog').hidden = false; $('#ota-bar').value = 0;
+  $('#ota-msg').innerHTML = `⚠️ Le boîtier va télécharger la mise à jour puis <b>redémarrer</b> (~30 s).
+    <button id="ota-go" class="btn primary" style="margin-left:6px">Confirmer</button>
+    <button id="ota-cancel" class="btn">Annuler</button>`;
+  $('#ota-cancel').onclick = () => { $('#ota-prog').hidden = true; $('#ota-msg').textContent = ''; };
+  $('#ota-go').onclick = () => {
+    $('#ota-github').disabled = true; $('#ota-msg').textContent = 'téléchargement…';
+    api('/api/ota/pull', { method: 'POST', body: JSON.stringify({ url: githubUrl }) }).catch(() => {});
+    let done = false, misses = 0;
+    const reboot = () => {   /* fin d'OTA : le boîtier redémarre -> on attend qu'il revienne et on recharge */
+      if (done) return; done = true;
+      $('#ota-bar').value = 100;
+      let n = 15;
+      const t = setInterval(async () => {
+        const s = await api('/api/ota/status').catch(() => null);
+        if (s || --n <= 0) { clearInterval(t); $('#ota-msg').textContent = '✅ Mise à jour installée — rechargement…'; setTimeout(() => location.reload(), 900); }
+        else $('#ota-msg').textContent = `✅ Installée — redémarrage… reconnexion (${n})`;
+      }, 1000);
+    };
+    const poll = setInterval(async () => {
+      const s = await api('/api/ota/status').catch(() => null);
+      if (s) {
+        misses = 0;
+        if (s.total) $('#ota-bar').value = Math.round(100 * s.written / s.total);
+        $('#ota-msg').textContent = s.msg || 'en cours…';
+        if (s.state === 99) { clearInterval(poll); $('#ota-msg').textContent = '✗ échec : ' + (s.msg || 'voir logs'); $('#ota-github').disabled = false; }
+        else if (s.state === 4) { clearInterval(poll); reboot(); }   /* REBOOTING */
+      } else if (++misses >= 3) { clearInterval(poll); reboot(); }   /* injoignable = redémarrage */
+    }, 800);
+  };
 };
 
 /* ── Restauration ── */
