@@ -147,6 +147,10 @@ function renderLearnSlots() {
   const box = $('#learn-slots'); if (!box) return;
   const id = activeVolet;
   const v = (statusCache.volets || []).find(x => x.id === id);
+  if (v && v.virt) {   // volet enrôlé (télécommande virtuelle) -> pas d'apprentissage/clonage
+    box.innerHTML = `<div class="statline ok"><span class="dot"></span><b>Ce volet a une télécommande virtuelle.</b> Pas de clonage nécessaire — il est piloté par génération. Gère-le dans <b>Créer une télécommande</b>.</div>`;
+    return;
+  }
   const cmd = (v && v.cmd) || {};
   box.innerHTML = '';
   for (const A of LEARN_ACTIONS) {
@@ -273,6 +277,7 @@ async function captureAction(action, btn) {
 
 const newVoletInput = $('#new-volet');
 if (newVoletInput) newVoletInput.oninput = () => { activeVolet = newVoletInput.value.trim(); renderLearnSlots(); };
+if ($('#goto-enrol')) $('#goto-enrol').onclick = (e) => { e.preventDefault(); location.hash = 'remotes/enrol'; };
 
 const delVoletBtn = $('#del-volet');
 if (delVoletBtn) delVoletBtn.onclick = async () => {

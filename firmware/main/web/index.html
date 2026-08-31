@@ -36,21 +36,21 @@
     <!-- Volets -->
     <section class="panel active" data-p="control">
       <div class="grid two" id="volets"></div>
-      <p class="hint" id="control-empty" hidden>Aucun volet. Va dans <b>Télécommandes → Apprentissage</b> pour en capturer un.</p>
+      <p class="hint" id="control-empty" hidden>Aucun volet. Va dans <b>Télécommandes → Cloner une télécommande</b> pour en ajouter un.</p>
     </section>
 
     <!-- Télécommandes (sous-onglets) -->
     <section class="panel" data-p="remotes">
       <nav class="subtabs">
-        <button class="subtab active" data-s="learn">Apprentissage</button>
+        <button class="subtab active" data-s="learn">Cloner une télécommande</button>
+        <button class="subtab" data-s="enrol">Créer une télécommande</button>
         <button class="subtab" data-s="calib">Calibration</button>
-        <button class="subtab" data-s="enrol">Enrôlement (exp.)</button>
       </nav>
 
       <div class="subpanel active" data-sp="learn">
         <div class="card">
-          <h2>Apprendre un volet</h2>
-          <p class="sub">Choisis un volet (ou crée-le), puis capture chaque commande depuis ta vraie télécommande. Une capture par commande suffit, elle est rejouable à vie.</p>
+          <h2>Cloner une télécommande</h2>
+          <p class="sub">Tu as ta télécommande Profalux d'origine : choisis un volet (ou crée-le), puis capture chaque commande en appuyant dessus. Une capture par commande suffit.</p>
           <div class="field"><label>Volet</label><div id="volet-picker" class="chips"></div></div>
           <div class="field" id="new-volet-row" hidden><input id="new-volet" placeholder="Nom du nouveau volet"></div>
           <div class="field"><label>Nom de la télécommande</label>
@@ -66,6 +66,7 @@
           </div>
           <div class="row" id="del-volet-row" hidden><button id="del-volet" class="btn danger">🗑 Supprimer ce volet</button></div>
           <p class="hint" id="learn-hint">Choisis un volet ci-dessus pour activer la capture. Place-toi à moins d'un mètre du boîtier et appuie une fois sur le bon bouton.</p>
+          <div class="statline" style="margin-top:14px"><span class="dot"></span><b>Le clonage ne pilote pas ton moteur ?</b> Certains moteurs refusent le rejeu (rolling code strict). Dans ce cas, <a href="#" id="goto-enrol"><b>crée une télécommande virtuelle</b></a> — ça nécessite aussi ta télécommande d'origine.</div>
         </div>
       </div>
 
@@ -90,8 +91,8 @@
 
       <div class="subpanel" data-sp="enrol">
         <div class="card">
-          <div class="statline"><span class="dot"></span><b>Enrôlement d'un moteur Profalux / FranciaFlex.</b> Appuie sur ta télécommande d'origine : le boîtier l'identifie et lui attribue une identité — <b>nouvelle</b> si le moteur est inconnu, <b>la même</b> que la dernière fois s'il est déjà connu. Puis suis les gestes pour l'apprendre au moteur.</div>
-          <h2>Enrôlement du moteur</h2>
+          <div class="statline"><span class="dot"></span><b>À utiliser si le clonage ne pilote pas ton moteur.</b> On crée une nouvelle télécommande virtuelle et on l'apprend au moteur. <b>Nécessite ta télécommande d'origine</b> (pour le geste de validation). Appuie dessus : le boîtier l'identifie et attribue une identité — <b>nouvelle</b> si le moteur est inconnu, <b>la même</b> s'il est déjà connu.</div>
+          <h2>Créer une télécommande virtuelle</h2>
           <div class="field"><label>Modèle de moteur</label><select id="pfx-model"></select></div>
           <div class="row"><button id="pfx-capture" class="btn primary">📡 Appuie sur ta télécommande d'origine</button></div>
           <div class="statline" id="pfx-capture-status" hidden><span class="dot"></span><b></b></div>

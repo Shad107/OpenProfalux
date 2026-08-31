@@ -762,6 +762,11 @@ int shutters_create_virtual(const char *id, uint32_t serial, uint16_t counter, u
     bool has = false;
     for (int i = 0; i < v->n_serials; i++) if (!strcmp(v->serials[i], shex)) { has = true; break; }
     if (!has && v->n_serials < SH_MAX_SERIALS) strlcpy(v->serials[v->n_serials++], shex, SH_SERIAL_LEN);
+    /* Nomme la télécommande virtuelle -> l'UI affiche son NOM (pas le serial brut). */
+    int ri = -1;
+    for (int i = 0; i < s_nremotes; i++) if (!strcmp(s_remotes[i].serial, shex)) { ri = i; break; }
+    if (ri < 0 && s_nremotes < 16) { ri = s_nremotes++; strlcpy(s_remotes[ri].serial, shex, SH_SERIAL_LEN); }
+    if (ri >= 0) strlcpy(s_remotes[ri].name, id, SH_ID_LEN);
     save_cfg();
     announce_one(v);
     UNLOCK();
@@ -963,6 +968,7 @@ int shutters_status_json(char *buf, int cap) {
         volet_t *v = &s_volets[i];
         cJSON *o = cJSON_CreateObject();
         cJSON_AddStringToObject(o, "id", v->id);
+        if (v->virt) cJSON_AddBoolToObject(o, "virt", true);   /* volet a telecommande virtuelle -> pas d'apprentissage */
         cJSON_AddNumberToObject(o, "position", (int)(v->position + 0.5f));
         cJSON_AddNumberToObject(o, "travel_up_ms", v->travel_up_ms);     /* pour reafficher la calibration dans l'UI */
         cJSON_AddNumberToObject(o, "travel_down_ms", v->travel_down_ms);
