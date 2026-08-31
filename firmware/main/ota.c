@@ -107,8 +107,11 @@ esp_err_t ota_upload_abort(void)
 
 esp_err_t ota_pull_from_url(const char *url)
 {
+    /* buffer_size par defaut (512) trop petit pour les en-tetes GitHub (302) + CDN
+     * -> "HTTP_CLIENT: Out of buffer". On agrandit le buffer RX d'en-tetes. */
     esp_http_client_config_t http_cfg = { .url = url, .crt_bundle_attach = esp_crt_bundle_attach,
-                                          .timeout_ms = 15000, .keep_alive_enable = true };
+                                          .timeout_ms = 15000, .keep_alive_enable = true,
+                                          .buffer_size = 4096, .buffer_size_tx = 1024 };
     esp_https_ota_config_t ota_cfg = { .http_config = &http_cfg };
     esp_https_ota_handle_t handle = NULL;
     esp_err_t err = esp_https_ota_begin(&ota_cfg, &handle);
